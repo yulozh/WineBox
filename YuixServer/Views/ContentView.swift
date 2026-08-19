@@ -47,7 +47,7 @@ struct ContentView: View {
     // MARK: - 顶部工具栏
 
     private var toolbar: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "server.rack")
                     .font(.title2)
@@ -55,6 +55,33 @@ struct ContentView: View {
                 Text("YuixServer")
                     .font(.title2.bold())
             }
+
+            // 项目列表：切换/新建/删除
+            Menu {
+                ForEach(store.projects) { p in
+                    Button { selectProject(p) } label: {
+                        if store.activeProject?.id == p.id {
+                            Label("\(p.name) · :\(p.port)", systemImage: "checkmark")
+                        } else {
+                            Text("\(p.name) · :\(p.port)")
+                        }
+                    }
+                }
+                if store.projects.isEmpty {
+                    Text("暂无项目").foregroundColor(.secondary)
+                }
+                Divider()
+                Button { showNewProject = true } label: { Label("新建项目", systemImage: "plus") }
+                if store.activeProject != nil {
+                    Button(role: .destructive) { deleteActiveProject() } label: {
+                        Label("删除当前项目", systemImage: "trash")
+                    }
+                }
+            } label: {
+                Label(store.activeProject?.name ?? "选择项目", systemImage: "folder")
+            }
+            .buttonStyle(.bordered)
+
             Button { withAnimation { sidebarVisible.toggle() } } label: {
                 Image(systemName: "sidebar.left")
             }
@@ -64,7 +91,7 @@ struct ContentView: View {
             Spacer()
 
             Button { showNewProject = true } label: {
-                Label("新建项目", systemImage: "plus.circle.fill")
+                Label("新建", systemImage: "plus")
             }
             .buttonStyle(.borderedProminent)
 
@@ -81,6 +108,20 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .glass()
+    }
+
+    // MARK: - 项目操作
+
+    private func selectProject(_ project: Project) {
+        store.activeProject = project
+        store.selectedFileURL = nil
+        store.refreshFileTree()
+    }
+
+    private func deleteActiveProject() {
+        if let project = store.activeProject {
+            store.deleteProject(project)
+        }
     }
 
     // MARK: - 中心区（编辑器 / 终端）
@@ -144,7 +185,6 @@ struct NewProjectSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = "myapp"
     @State private var language: Language = .python
-    @State private var port = 8080
 
     var body: some View {
         NavigationStack {
@@ -154,13 +194,12 @@ struct NewProjectSheet: View {
                     Picker("语言", selection: $language) {
                         ForEach(Language.allCases) { Text($0.rawValue).tag($0) }
                     }
-                    Label("自动分配端口 \(port)", systemImage: "network")
+                    Label("端口自动分配", systemImage: "network")
+                        .foregroundColor(.secondary)
                 }
                 Section {
                     Button("创建") {
-                        if let p = store.createProject(name: name, language: language) {
-                            port = p.port
-                        }
+                        _ = store.createProject(name: name, language: language)
                         dismiss()
                     }
                 }

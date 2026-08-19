@@ -23,15 +23,10 @@ extension View {
     }
 }
 
-/// 主界面的渐变背景：让半透明毛玻璃的「透模糊」效果更明显。
+/// 主界面背景：改用系统中性底色（自动适配深/浅色），不再使用彩色渐变。
 struct GlassGradientBackground: View {
     var body: some View {
-        LinearGradient(
-            colors: [Color(red: 0.35, green: 0.20, blue: 0.75),
-                     Color(red: 0.13, green: 0.38, blue: 0.83),
-                     Color(red: 0.10, green: 0.62, blue: 0.72)],
-            startPoint: .topLeading, endPoint: .bottomTrailing
-        )
-        .ignoresSafeArea()
+        Color(.systemGroupedBackground)
+            .ignoresSafeArea()
     }
 }

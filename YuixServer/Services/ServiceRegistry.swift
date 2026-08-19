@@ -43,8 +43,12 @@ final class DefaultRuntime: RuntimeProviding {
     }
 
     func previewURL(project: Project) -> URL? {
-        // 静态语言直接预览入口 HTML 文件；脚本语言在真实运行时接入前返回空。
-        guard project.language == .html else { return nil }
-        return root.appendingPathComponent(project.name).appendingPathComponent("index.html")
+        // 沙盒内无法监听真实端口，因此「预览/访问」统一在内置浏览器中打开项目入口文件：
+        //  - Static(HTML) 会被当作网页渲染；
+        //  - Python/PHP/Node 脚本会以文本形式展示（真实运行时接入后改为 http://局域网IP:port）。
+        let dir = root.appendingPathComponent(project.name)
+        let entry = dir.appendingPathComponent(project.language.entryFileName)
+        if FileManager.default.fileExists(atPath: entry.path) { return entry }
+        return dir
     }
 }

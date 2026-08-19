@@ -31,13 +31,12 @@ struct TerminalView: View {
 
     private var terminalHeader: some View {
         HStack(spacing: 8) {
-            Circle().fill(Color(red: 1.00, green: 0.38, blue: 0.35)).frame(width: 12, height: 12)
-            Circle().fill(Color(red: 1.00, green: 0.78, blue: 0.27)).frame(width: 12, height: 12)
-            Circle().fill(Color(red: 0.32, green: 0.84, blue: 0.44)).frame(width: 12, height: 12)
-            Spacer()
+            Image(systemName: "terminal")
+                .foregroundColor(.white.opacity(0.55))
             Text("bash ~/\(cwd.lastPathComponent)")
                 .font(.caption2.monospaced())
                 .foregroundColor(.white.opacity(0.55))
+            Spacer()
             Button { lines = []; warmUp() } label: {
                 Image(systemName: "trash").foregroundColor(.white.opacity(0.6))
             }

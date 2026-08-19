@@ -105,6 +105,9 @@ final class ProjectStore: ObservableObject {
         projects = list
         // 同步重建服务列表初值
         services = list.map { ServiceInfo(projectID: $0.id, name: $0.name, port: $0.port, language: $0.language, pid: nil, status: .stopped) }
+        // 启动后自动选中第一个项目，避免界面空白
+        if activeProject == nil { activeProject = projects.first }
+        refreshFileTree()
     }
 
     // MARK: - 文件树
