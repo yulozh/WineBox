@@ -50,6 +50,8 @@ targets:
           - CFBundleURLSchemes:
               - yuixserver
         NSLocalNetworkUsageDescription: "YuixServer 需要访问本地网络以显示设备的局域网 IP，并允许同一 Wi-Fi 下的其他设备访问你启动的服务。"
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true   # 允许内置浏览器打开 http://127.0.0.1 与局域网地址做端口测试
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationPortraitUpsideDown

@@ -1,16 +1,14 @@
 import SwiftUI
 
-/// 底部服务状态栏：显示本机 IP、服务列表（名称/端口/状态），
-/// 提供 运行/停止 与「预览」，以及项目导入/导出。
+/// 底部服务状态栏：本机 IP、服务列表（真实端口监听状态）、预览、导入导出与端口测试。
 struct ServiceStatusBar: View {
     @EnvironmentObject var store: ProjectStore
     @State private var previewURL: IdentifiableURL?
     @State private var showExportPicker = false
     @State private var showImportPicker = false
     @State private var exportFileURL: URL?
+    @State private var showPortTest = false
     @State private var errorMessage: String?
-
-    private var runtime: RuntimeProviding { DefaultRuntime(root: store.rootURL) }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -33,6 +31,7 @@ struct ServiceStatusBar: View {
 
                 Divider().frame(height: 26)
 
+                Button { showPortTest = true } label: { Label("端口测试", systemImage: "dot.scope") }
                 Button { showImportPicker = true } label: { Label("导入", systemImage: "square.and.arrow.down") }
                 Button { beginExport() } label: { Label("导出容器", systemImage: "square.and.arrow.up") }
             }
@@ -43,11 +42,12 @@ struct ServiceStatusBar: View {
         .sheet(item: $previewURL) { item in
             NavigationStack {
                 WebPreviewView(url: item.url)
-                    .navigationTitle(item.url.lastPathComponent)
+                    .navigationTitle(item.url.absoluteString)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { previewURL = nil } } }
             }
         }
+        .sheet(isPresented: $showPortTest) { PortTestView() }
         .sheet(isPresented: $showExportPicker) {
             if let url = exportFileURL { ExportDocumentPicker(url: url) }
         }
@@ -57,7 +57,6 @@ struct ServiceStatusBar: View {
                 importArchive(url: url)
             }
         }
-        // 修复：导出/导入失败原来只 print，用户毫无感知
         .alert("操作失败", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("好", role: .cancel) { errorMessage = nil }
         } message: {
@@ -66,7 +65,6 @@ struct ServiceStatusBar: View {
     }
 
     private func serviceBadge(_ service: ServiceInfo) -> some View {
-        // 找不到所属项目时只展示只读信息（旧版会凭空造一个新 UUID 的假项目，状态永远对不上）
         let project = store.projects.first { $0.id == service.projectID }
 
         return HStack(spacing: 8) {
@@ -75,8 +73,16 @@ struct ServiceStatusBar: View {
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
                 Text(service.name).font(.caption.bold()).lineLimit(1)
-                Text(":\(service.port) · \(service.language.rawValue)")
-                    .font(.caption2).foregroundColor(.secondary)
+                // 服务运行中：直接给出局域网地址，方便其他设备访问测试
+                if let project, let url = store.lanURL(for: project) {
+                    Text(url.absoluteString)
+                        .font(.caption2.monospaced())
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                } else {
+                    Text(":\(service.port) · \(service.language.rawValue)")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
             }
             if let project {
                 Button {
@@ -87,14 +93,14 @@ struct ServiceStatusBar: View {
                 .buttonStyle(.borderless)
 
                 Button {
-                    if let url = runtime.previewURL(project: project) {
+                    if let url = store.previewURL(for: project) {
                         previewURL = IdentifiableURL(url: url)
                     }
                 } label: {
                     Image(systemName: "safari")
                 }
                 .buttonStyle(.borderless)
-                .disabled(runtime.previewURL(project: project) == nil)
+                .disabled(store.previewURL(for: project) == nil)
             }
         }
         .padding(.horizontal, 10)
@@ -105,15 +111,8 @@ struct ServiceStatusBar: View {
     private func runOrStop(_ service: ServiceInfo, project: Project) {
         if service.status == .running {
             store.stopService(project)
-            runtime.stop(project: project)
         } else {
             store.startService(project)
-            runtime.start(project: project) { result in
-                switch result {
-                case .success: store.markServiceRunning(project)
-                case .failure: store.markServiceError(project)
-                }
-            }
         }
     }
 

@@ -3,8 +3,8 @@ import Foundation
 // MARK: - 运行时语言
 
 /// 应用内置的多语言运行时类型。
-/// 注意：受 iOS 沙盒限制，真正的进程运行由 RuntimeService 抽象层承载，
-/// 详见 Services/ServiceRegistry.swift 中的说明。
+/// 静态站点由 HTTPFileServer 提供真实端口监听；
+/// Python/PHP/Node 脚本运行时受 iOS 沙盒限制（禁止子进程），详见 HTTPFileServer 头部说明。
 enum Language: String, CaseIterable, Codable, Identifiable {
     case python = "Python"
     case php = "PHP"

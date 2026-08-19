@@ -132,6 +132,7 @@ final class ProjectStore: ObservableObject {
     }
 
     func deleteProject(_ project: Project) {
+        if let server = servers.removeValue(forKey: project.id) { server.stop() }
         try? FileManager.default.removeItem(at: projectURL(project))
         projects.removeAll { $0.id == project.id }
         if activeProject?.id == project.id { setActive(nil) }
@@ -244,12 +245,55 @@ final class ProjectStore: ObservableObject {
         catch { return false }
     }
 
-    // MARK: - 服务状态
+    // MARK: - 服务（真实 TCP 端口监听）
 
-    func startService(_ project: Project) { updateService(project.id) { $0.status = .starting } }
-    func markServiceRunning(_ project: Project) { updateService(project.id) { $0.status = .running } }
-    func stopService(_ project: Project) { updateService(project.id) { $0.status = .stopped } }
-    func markServiceError(_ project: Project) { updateService(project.id) { $0.status = .error } }
+    /// 运行中的服务器（key = 项目 id）。App 重启后不自动恢复，状态一律从 stopped 开始。
+    private var servers: [UUID: HTTPFileServer] = [:]
+
+    func isServiceRunning(_ projectID: UUID) -> Bool {
+        servers[projectID]?.isRunning == true
+    }
+
+    /// 启动：在 project.port 上监听 TCP，把项目目录作为静态站点对外提供。
+    func startService(_ project: Project) {
+        guard servers[project.id] == nil else { return }
+        updateService(project.id) { $0.status = .starting }
+        do {
+            let server = try HTTPFileServer(root: projectURL(project), port: UInt16(clamping: project.port))
+            server.onReady = { [weak self] in
+                self?.updateService(project.id) { $0.status = .running }
+            }
+            server.onFailed = { [weak self] _ in
+                self?.servers.removeValue(forKey: project.id)
+                self?.updateService(project.id) { $0.status = .error }
+            }
+            servers[project.id] = server
+            server.start()
+        } catch {
+            updateService(project.id) { $0.status = .error }
+        }
+    }
+
+    func stopService(_ project: Project) {
+        if let server = servers.removeValue(forKey: project.id) { server.stop() }
+        updateService(project.id) { $0.status = .stopped }
+    }
+
+    /// 预览地址：服务在跑时打开 http://127.0.0.1:port/（真实 HTTP 回环），
+    /// 否则退回直接预览入口文件。
+    func previewURL(for project: Project) -> URL? {
+        if isServiceRunning(project.id) {
+            return URL(string: "http://127.0.0.1:\(project.port)/")
+        }
+        let entry = projectURL(project).appendingPathComponent(project.language.entryFileName)
+        return FileManager.default.fileExists(atPath: entry.path) ? entry : nil
+    }
+
+    /// 局域网访问地址（服务运行时才有）：其他设备浏览器直接打开。
+    func lanURL(for project: Project) -> URL? {
+        guard isServiceRunning(project.id) else { return nil }
+        return URL(string: "http://\(localIP):\(project.port)/")
+    }
 
     private func updateService(_ id: UUID, _ mutate: (inout ServiceInfo) -> Void) {
         guard let idx = services.firstIndex(where: { $0.projectID == id }) else { return }
