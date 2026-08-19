@@ -86,10 +86,11 @@ final class LinuxRuntime: ObservableObject {
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let boot = YXLinuxBoot.shared()
-            // 注意：bootWithError: 被 Swift 导入为 throws 方法，
-            // 这里用 bootWithFailureMessage: 避免错误约定转换。
+            // 注意：bootWithError: 被 Swift 导入为 throws 方法；
+            // bootWithFailureMessage: 经 ObjC→Swift 名称转换后为
+            // boot(withFailureMessage:)，参数为 AutoreleasingUnsafeMutablePointer<NSString?>。
             var failureMessage: NSString?
-            let ok = boot.bootWithFailureMessage(&failureMessage)
+            let ok = boot.boot(withFailureMessage: &failureMessage)
             let message = failureMessage as String?
             Task { @MainActor [weak self] in
                 timer.invalidate() // Timer 必须在创建它的线程（主线程）上 invalidate
