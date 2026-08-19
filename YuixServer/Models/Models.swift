@@ -3,8 +3,10 @@ import Foundation
 // MARK: - 运行时语言
 
 /// 应用内置的多语言运行时类型。
-/// 静态站点由 HTTPFileServer 提供真实端口监听；
-/// Python/PHP/Node 脚本运行时受 iOS 沙盒限制（禁止子进程），详见 HTTPFileServer 头部说明。
+/// - Static / Node.js：可直接运行。静态站由 HTTPFileServer 提供真实端口监听；
+///   JS 脚本由 JSScriptRunner 基于系统 JavaScriptCore 真实执行（无需子进程）。
+/// - Python / PHP：需要把解释器编译成静态库嵌入（libPython / php-embed），
+///   属后续增强，不依赖子进程，上架合规。
 enum Language: String, CaseIterable, Codable, Identifiable {
     case python = "Python"
     case php = "PHP"
@@ -31,7 +33,12 @@ enum Language: String, CaseIterable, Codable, Identifiable {
         case .php:
             return "<?php\n// index.php\necho 'YuixServer: PHP 环境已就绪';\n"
         case .node:
-            return "// server.js\nconst http = require('http');\nconst port = process.env.PORT || 8080;\nconst server = http.createServer((req, res) => res.end('YuixServer: Node.js 环境已就绪'));\nserver.listen(port, () => console.log('listening on ' + port));\n"
+            return """
+            // server.js —— 由 YuixServer 内置 JavaScriptCore 运行时执行
+            console.log('YuixServer: Node.js 环境已就绪');
+            function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
+            console.log('fib(10) =', fib(10));
+            """
         case .html:
             return "<!doctype html>\n<html><body><h1>YuixServer</h1><p>Static site</p></body></html>\n"
         }

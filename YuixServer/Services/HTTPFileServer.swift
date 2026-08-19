@@ -144,6 +144,13 @@ final class HTTPFileServer {
     }
 
     private func serve(path rawPath: String, method: String, connection: NWConnection) {
+        // 脚本执行路由：GET /run/<路径>.js 真正执行项目内的 JavaScript 并返回输出
+        if rawPath.hasPrefix("/run/") {
+            let rel = String(rawPath.dropFirst("/run/".count))
+            serveRun(rel, method: method, connection: connection)
+            return
+        }
+
         let decoded = rawPath.removingPercentEncoding ?? rawPath
         // 重组安全相对路径：丢弃 . 与 .. 段，杜绝目录穿越
         let segments = decoded.split(separator: "/").filter { $0 != "." && $0 != ".." }
@@ -177,6 +184,35 @@ final class HTTPFileServer {
         }
         respond(status: "200 OK", contentType: Self.mime(for: fileURL.path),
                 body: body, method: method, connection: connection)
+    }
+
+    /// 执行路由：真正运行项目目录内的 .js 脚本，把 console 输出作为响应返回。
+    private func serveRun(_ rel: String, method: String, connection: NWConnection) {
+        let segments = rel.split(separator: "/").filter { $0 != "." && $0 != ".." }
+        guard let name = segments.last, name.lowercased().hasSuffix(".js") else {
+            respond(status: "400 Bad Request", contentType: "text/plain; charset=utf-8",
+                    body: Data("只支持执行 .js 脚本\n".utf8), method: method, connection: connection)
+            return
+        }
+        let fileURL = root.appendingPathComponent(segments.joined(separator: "/"))
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            respond(status: "404 Not Found", contentType: "text/plain; charset=utf-8",
+                    body: Data("脚本不存在\n".utf8), method: method, connection: connection)
+            return
+        }
+
+        let result = JSScriptRunner.runFile(at: fileURL)
+        var text = result.output
+        if !result.returnValue.isEmpty, result.returnValue != "undefined" {
+            text += "=> \(result.returnValue)\n"
+        }
+        if let error = result.error {
+            text += "错误: \(error)\n"
+        }
+
+        let status = result.error == nil ? "200 OK" : "500 Internal Server Error"
+        respond(status: status, contentType: "text/plain; charset=utf-8",
+                body: Data(text.utf8), method: method, connection: connection)
     }
 
     private func respond(status: String, contentType: String, body: Data,

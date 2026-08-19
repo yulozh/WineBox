@@ -7,6 +7,7 @@ struct FileTreeView: View {
     @State private var newName: String = ""
     @State private var deleteTarget: FileNode?
     @State private var previewURL: IdentifiableURL?
+    @State private var runOutcome: ScriptRunOutcome?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -67,6 +68,12 @@ struct FileTreeView: View {
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { previewURL = nil } } }
             }
         }
+        .sheet(item: $runOutcome) { outcome in
+            NavigationStack {
+                ScriptRunSheet(outcome: outcome)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { runOutcome = nil } } }
+            }
+        }
     }
 
     @ViewBuilder
@@ -87,6 +94,11 @@ struct FileTreeView: View {
             if !node.isDirectory {
                 Button { store.selectedFileURL = node.url } label: { Label("打开", systemImage: "doc.text") }
                 Button { previewURL = IdentifiableURL(url: node.url) } label: { Label("预览", systemImage: "safari") }
+                if node.name.lowercased().hasSuffix(".js") {
+                    Button {
+                        runOutcome = ScriptRunOutcome(file: node.name, result: JSScriptRunner.runFile(at: node.url))
+                    } label: { Label("运行脚本", systemImage: "play") }
+                }
             }
             Button { renameTarget = node; newName = node.name } label: { Label("重命名", systemImage: "pencil") }
             Button(role: .destructive) { deleteTarget = node } label: { Label("删除", systemImage: "trash") }
@@ -100,6 +112,60 @@ struct FileTreeView: View {
         case "php", "js", "ts", "html", "css", "json": return "curlybraces"
         case "md", "txt": return "doc.text"
         default: return "doc"
+        }
+    }
+}
+
+/// 脚本执行结果包装（为 sheet(item:) 提供 Identifiable）。
+struct ScriptRunOutcome: Identifiable {
+    let id = UUID()
+    let file: String
+    let result: JSScriptRunner.Result
+}
+
+/// 脚本执行结果面板：输出、返回值、异常分段展示。
+private struct ScriptRunSheet: View {
+    let outcome: ScriptRunOutcome
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if !outcome.result.output.isEmpty {
+                    block(title: "输出", text: outcome.result.output, color: .primary)
+                }
+                if !outcome.result.returnValue.isEmpty, outcome.result.returnValue != "undefined" {
+                    block(title: "返回值", text: outcome.result.returnValue, color: .primary)
+                }
+                if let error = outcome.result.error {
+                    block(title: "错误", text: error, color: .red)
+                }
+                if outcome.result.output.isEmpty,
+                   outcome.result.returnValue == "undefined" || outcome.result.returnValue.isEmpty,
+                   outcome.result.error == nil {
+                    Text("脚本执行完成，无输出")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+        }
+        .navigationTitle(outcome.file)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func block(title: String, text: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.secondary)
+            Text(text)
+                .font(.system(.footnote, design: .monospaced))
+                .foregroundColor(color)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 }
