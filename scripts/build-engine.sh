@@ -19,12 +19,20 @@ BUILD="$ENGINE/build"
 for tool in meson ninja clang python3; do
     command -v "$tool" >/dev/null || { echo "缺少 $tool，请先: brew install meson ninja llvm"; exit 1; }
 done
+# Homebrew 自 LLVM 21 起 LLD 拆分为独立 formula（keg-only，不在 PATH）。
+# vdso 链接用 -fuse-ld=lld → clang 在 PATH 里找 ld.lld，必须显式加进来。
+if ! command -v ld.lld >/dev/null && ! [ -x /opt/homebrew/opt/lld/bin/ld.lld ] && ! [ -x /usr/local/opt/lld/bin/ld.lld ]; then
+    echo "缺少 lld（brew 的 llvm@21+ 已不含 LLD），请先: brew install lld" >&2
+    exit 1
+fi
 
 # ---- iOS 交叉编译环境（模拟 Xcode 的构建环境）----
 export SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
 export IPHONEOS_DEPLOYMENT_TARGET=16.0
-# brew llvm 优先：vdso 需要带 lld 的 clang（-target aarch64-linux-gnu -fuse-ld=lld）
-for P in /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin; do
+# brew llvm/lld 优先：vdso 需要 -target aarch64-linux-gnu -fuse-ld=lld
+# （clang 通过 PATH 查找 ld.lld；llvm/lld 均为 keg-only，需手动前置）
+for P in /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin \
+         /opt/homebrew/opt/lld/bin /usr/local/opt/lld/bin; do
     [ -d "$P" ] && export PATH="$P:$PATH"
 done
 echo "SDKROOT=$SDKROOT"

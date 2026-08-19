@@ -21,7 +21,21 @@ if clang.found()
         endif
     endif
 
-    vdso_compiler = [clang, '-target', 'aarch64-linux-gnu', '-fuse-ld=lld']
+    # Homebrew splits LLD out of llvm@21+ into a keg-only `lld` formula, so
+    # `-fuse-ld=lld` can no longer resolve ld.lld next to clang. Locate ld.lld
+    # explicitly and pass its directory via -B (highest-priority tool search
+    # path, understood by every clang version) so the link never depends on PATH.
+    fs = import('fs')
+    lld = find_program('ld.lld', '/opt/homebrew/opt/lld/bin/ld.lld', '/usr/local/opt/lld/bin/ld.lld', required: false)
+    lld_prefix = []
+    if lld.found()
+        lld_prefix = ['-B' + fs.parent(lld.full_path())]
+        message('ARM64 VDSO: using lld at ' + lld.full_path())
+    else
+        message('ARM64 VDSO: ld.lld not found; relying on PATH for -fuse-ld=lld')
+    endif
+
+    vdso_compiler = [clang, '-target', 'aarch64-linux-gnu', '-fuse-ld=lld'] + lld_prefix
 
     vdso = custom_target('vdso-arm64',
         input: ['vdso.S', 'vdso.c', 'vdso.lds'],
