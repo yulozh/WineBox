@@ -219,7 +219,7 @@ final class ConsoleModel: ObservableObject {
         }
     }
 
-    private func updateWidthTask: Task<Void, Never>?
+    private var updateWidthTask: Task<Void, Never>?
 
     func updateWidth(_ width: CGFloat) {
         updateWidthTask?.cancel()

@@ -61,7 +61,7 @@ final class VT100 {
                     runText = ""
                     runKey = key
                     var attrs: [NSAttributedString.Key: Any] = [
-                        .font: cell.bold ? baseFont.bold() : baseFont,
+                        .font: cell.bold ? VT100.boldFont(baseFont) : baseFont,
                         .foregroundColor: cell.inverse ? VT100.color(0) : VT100.color(cell.fg),
                     ]
                     if cell.inverse {
@@ -339,5 +339,19 @@ final class VT100 {
 
     static func color(_ idx: UInt8) -> UIColor {
         palette[Int(idx) % palette.count]
+    }
+
+    /// 粗体版本字体（UIFont 没有 .bold()；用描述符派生并缓存，避免逐 run 重建）
+    private static var boldFontCache: [CGFloat: UIFont] = [:]
+    static func boldFont(_ font: UIFont) -> UIFont {
+        if let cached = boldFontCache[font.pointSize] { return cached }
+        let bold: UIFont
+        if let descriptor = font.fontDescriptor.withSymbolicTraits(.traitBold) {
+            bold = UIFont(descriptor: descriptor, size: font.pointSize)
+        } else {
+            bold = UIFont.boldSystemFont(ofSize: font.pointSize)
+        }
+        boldFontCache[font.pointSize] = bold
+        return bold
     }
 }
