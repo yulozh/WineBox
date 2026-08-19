@@ -201,7 +201,7 @@ final class HTTPFileServer {
             return
         }
 
-        let result = JSScriptRunner.runFile(at: fileURL)
+        let result = JSScriptRunner.runFile(at: fileURL, env: ["PORT": String(port)])
         var text = result.output
         if !result.returnValue.isEmpty, result.returnValue != "undefined" {
             text += "=> \(result.returnValue)\n"

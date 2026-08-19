@@ -34,8 +34,11 @@ enum Language: String, CaseIterable, Codable, Identifiable {
             return "<?php\n// index.php\necho 'YuixServer: PHP 环境已就绪';\n"
         case .node:
             return """
-            // server.js —— 由 YuixServer 内置 JavaScriptCore 运行时执行
-            console.log('YuixServer: Node.js 环境已就绪');
+            // server.js —— 由 YuixServer 内置 JavaScriptCore 运行时真实执行
+            const fs = require('fs');
+            console.log('PORT =', process.env.PORT || '(本地运行，未设端口)');
+            console.log('工作目录 =', process.cwd());
+            console.log('目录内文件数 =', fs.readdirSync('.').length);
             function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
             console.log('fib(10) =', fib(10));
             """
@@ -64,7 +67,7 @@ struct Project: Identifiable, Codable, Hashable {
     }
 }
 
-// MARK: - 服务状态
+// MARK: - 服务与端口
 
 enum ServiceStatus: String, Codable {
     case stopped, starting, running, error
