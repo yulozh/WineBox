@@ -14,6 +14,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 extern NSString *const YXLinuxBootErrorDomain;
 
+/// 通知：guest 内进程退出。userInfo: {pid: NSNumber, code: NSNumber}
+extern NSString *const YXLinuxProcessExitedNotification;
+/// 通知：内核异常死亡。userInfo: {message: NSString}
+extern NSString *const YXLinuxKernelDiedNotification;
+
 typedef NS_ENUM(NSInteger, YXLinuxBootState) {
     YXLinuxBootStateIdle = 0,
     YXLinuxBootStateImportingRootfs,
