@@ -30,8 +30,7 @@ final class LinuxRuntime: ObservableObject {
         return false
     }
 
-    private let boot = YXLinuxBoot.shared
-    private var outputToken: NSNumber?
+    private let boot = YXLinuxBoot.shared()
     private var exitedObserver: NSObjectProtocol?
     private var diedObserver: NSObjectProtocol?
     private var booting = false
@@ -59,7 +58,6 @@ final class LinuxRuntime: ObservableObject {
     deinit {
         if let exitedObserver { NotificationCenter.default.removeObserver(exitedObserver) }
         if let diedObserver { NotificationCenter.default.removeObserver(diedObserver) }
-        if let outputToken { boot.removeOutputHandler(outputToken.uintValue) }
     }
 
     // MARK: - 启动
@@ -87,7 +85,7 @@ final class LinuxRuntime: ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let boot = YXLinuxBoot.shared
+            let boot = YXLinuxBoot.shared()
             var nsError: NSError?
             let ok = boot.bootWithError(&nsError)
             timer.invalidate()
@@ -160,14 +158,14 @@ final class LinuxRuntime: ObservableObject {
             },
             completion: { r in
                 var result = CommandResult()
-                result.exitCode = r.exitCode
+                result.exitCode = Int(r.exitCode)
                 result.output = r.output
                 result.errorOutput = r.errorOutput
                 result.duration = r.duration
                 result.truncated = r.truncated
                 completion?(result)
             })
-        return pid
+        return Int(pid)
     }
 
     /// 同步执行（阻塞当前线程；不要在主线程调用）。
@@ -176,7 +174,7 @@ final class LinuxRuntime: ObservableObject {
         let r = YXLinuxShell.executeCommandSync(command, timeout: timeout, lineCallback: nil)
         var result = CommandResult()
         guard let r else { return result }
-        result.exitCode = r.exitCode
+        result.exitCode = Int(r.exitCode)
         result.output = r.output
         result.errorOutput = r.errorOutput
         result.duration = r.duration
@@ -203,8 +201,9 @@ final class LinuxRuntime: ObservableObject {
         return rel.isEmpty ? guestProjectsRoot : guestProjectsRoot + rel
     }
 
-    /// 项目在 guest 内的路径
-    nonisolated static func guestPath(forProject project: Project, in store: ProjectStore) -> String? {
+    /// 项目在 guest 内的路径（MainActor：ProjectStore 是 @MainActor，
+    /// 唯一调用点 startService 同样运行在主 actor 上）
+    static func guestPath(forProject project: Project, in store: ProjectStore) -> String? {
         guestPath(for: store.projectURL(project))
     }
 }
