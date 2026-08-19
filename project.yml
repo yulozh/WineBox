@@ -11,6 +11,7 @@ options:
   deploymentTarget:
     iOS: "16.0"
   xcodeVersion: "15.0"
+  objectVersion: 56          # 强制生成 Xcode 14 兼容格式，避免 CI 上 Xcode 15.x 读不了新格式(77)
   createIntermediateGroups: true
 
 # 仅一个第三方依赖：ZIPFoundation（用于 .zip 压缩导出/导入），纯 Swift、App Store 合规。
