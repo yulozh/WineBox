@@ -1,23 +1,23 @@
 import SwiftUI
 
-/// 底部服务状态栏：显示局域网 IP、活动服务列表（名称/端口/状态），
-/// 提供 运行/停止 与「预览/打开地址」，并支持「导出容器」。
+/// 底部服务状态栏：显示本机 IP、服务列表（名称/端口/状态），
+/// 提供 运行/停止 与「预览」，以及项目导入/导出。
 struct ServiceStatusBar: View {
     @EnvironmentObject var store: ProjectStore
     @State private var previewURL: IdentifiableURL?
     @State private var showExportPicker = false
     @State private var showImportPicker = false
     @State private var exportFileURL: URL?
+    @State private var errorMessage: String?
 
     private var runtime: RuntimeProviding { DefaultRuntime(root: store.rootURL) }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
-                // 局域网访问提示
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("局域网 IP").font(.caption2).foregroundColor(.secondary)
-                    Text("http://\(store.localIP)")
+                    Text("本机 IP").font(.caption2).foregroundColor(.secondary)
+                    Text(store.localIP)
                         .font(.caption.monospaced())
                 }
 
@@ -57,10 +57,19 @@ struct ServiceStatusBar: View {
                 importArchive(url: url)
             }
         }
+        // 修复：导出/导入失败原来只 print，用户毫无感知
+        .alert("操作失败", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button("好", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
     }
 
     private func serviceBadge(_ service: ServiceInfo) -> some View {
-        HStack(spacing: 8) {
+        // 找不到所属项目时只展示只读信息（旧版会凭空造一个新 UUID 的假项目，状态永远对不上）
+        let project = store.projects.first { $0.id == service.projectID }
+
+        return HStack(spacing: 8) {
             Circle()
                 .fill(statusColor(service.status))
                 .frame(width: 8, height: 8)
@@ -69,35 +78,31 @@ struct ServiceStatusBar: View {
                 Text(":\(service.port) · \(service.language.rawValue)")
                     .font(.caption2).foregroundColor(.secondary)
             }
-            Button {
-                runOrStop(service)
-            } label: {
-                Image(systemName: service.status == .running ? "stop.fill" : "play.fill")
-            }
-            .buttonStyle(.borderless)
-
-            Button {
-                if let url = runtime.previewURL(project: project(for: service)) {
-                    previewURL = IdentifiableURL(url: url)
+            if let project {
+                Button {
+                    runOrStop(service, project: project)
+                } label: {
+                    Image(systemName: service.status == .running ? "stop.fill" : "play.fill")
                 }
-            } label: {
-                Image(systemName: "safari")
+                .buttonStyle(.borderless)
+
+                Button {
+                    if let url = runtime.previewURL(project: project) {
+                        previewURL = IdentifiableURL(url: url)
+                    }
+                } label: {
+                    Image(systemName: "safari")
+                }
+                .buttonStyle(.borderless)
+                .disabled(runtime.previewURL(project: project) == nil)
             }
-            .buttonStyle(.borderless)
-            .disabled(runtime.previewURL(project: project(for: service)) == nil)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func project(for service: ServiceInfo) -> Project {
-        store.projects.first { $0.id == service.projectID }
-            ?? Project(name: service.name, language: service.language, port: service.port)
-    }
-
-    private func runOrStop(_ service: ServiceInfo) {
-        let project = project(for: service)
+    private func runOrStop(_ service: ServiceInfo, project: Project) {
         if service.status == .running {
             store.stopService(project)
             runtime.stop(project: project)
@@ -113,27 +118,31 @@ struct ServiceStatusBar: View {
     }
 
     private func beginExport() {
-        guard let project = store.activeProject else { return }
+        guard let project = store.activeProject else {
+            errorMessage = "请先选择一个项目"
+            return
+        }
         do {
             let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let tmp = docs.appendingPathComponent("tmp", isDirectory: true)
             try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-            let zip = try ArchiveService.exportProject(project, root: store.rootURL, to: tmp)
-            exportFileURL = zip
+            exportFileURL = try ArchiveService.exportProject(project, root: store.rootURL, to: tmp)
             showExportPicker = true
         } catch {
-            print("导出失败: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
     }
 
     private func importArchive(url: URL) {
         do {
             let dir = try ArchiveService.importArchive(at: url, root: store.rootURL)
-            let name = dir.lastPathComponent
-            // 导入后建项目元数据（默认 node/端口自动分配）
-            _ = store.createProject(name: name, language: .node)
+            let language = ArchiveService.detectLanguage(in: dir)
+            guard store.createProject(name: dir.lastPathComponent, language: language) != nil else {
+                errorMessage = store.lastCreateError ?? "导入失败"
+                return
+            }
         } catch {
-            print("导入失败: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
     }
 

@@ -30,8 +30,15 @@ final class AIService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            let text = String(data: data, encoding: .utf8) ?? "HTTP 错误"
-            throw AIError(message: text)
+            // 优先取服务端返回的 error.message，而不是把整段 JSON 甩给用户
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            var message = "HTTP \(code)"
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let err = json["error"] as? [String: Any],
+               let msg = err["message"] as? String {
+                message = msg
+            }
+            throw AIError(message: message)
         }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = json["choices"] as? [[String: Any]],

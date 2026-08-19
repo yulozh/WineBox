@@ -22,10 +22,11 @@ enum ShellService {
     """
 
     /// 解析并执行一行命令，cwd 为当前工作目录。
+    /// 词法切分用任意空白（旧版按单个空格 split，连续空格会产生空参数）。
     static func execute(_ raw: String, cwd: URL) -> Result {
         let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !line.isEmpty else { return Result(output: "", status: 0) }
-        let parts = line.split(separator: " ").map(String.init)
+        let parts = line.split(whereSeparator: \.isWhitespace).map(String.init)
         let cmd = parts[0]
         let args = Array(parts.dropFirst())
 
@@ -50,7 +51,12 @@ enum ShellService {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else {
             return Result(output: "ls: \(dir.lastPathComponent): No such file or directory", status: 1)
         }
-        let out = names.sorted().joined(separator: "\n")
+        // 目录加 / 后缀，和真实 ls 的观感一致
+        let out = names.sorted().map { name -> String in
+            var isDir: ObjCBool = false
+            FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path, isDirectory: &isDir)
+            return isDir.boolValue ? name + "/" : name
+        }.joined(separator: "\n")
         return Result(output: out, status: 0)
     }
 

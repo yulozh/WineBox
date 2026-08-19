@@ -8,7 +8,7 @@ struct TerminalView: View {
     @State private var input = ""
     @State private var lines: [String] = []
     @FocusState private var focused: Bool
-    private let prompt = "yuix$"
+    private let prompt = "yuix $"
 
     /// 终端工作目录 = 当前项目目录（无项目则用根目录）
     private var cwd: URL {

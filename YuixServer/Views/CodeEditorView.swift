@@ -25,6 +25,9 @@ struct CodeEditorView: UIViewRepresentable {
     }
 
     func updateUIView(_ tv: UITextView, context: Context) {
+        // 修复：必须回写 parent，否则重渲染后 Coordinator 仍持有旧的 binding，
+        // 输入内容会写到过期引用上（UIViewRepresentable 的经典坑）。
+        context.coordinator.parent = self
         if tv.text != text {
             tv.text = text
             applyHighlighting(to: tv)

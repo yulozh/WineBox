@@ -10,8 +10,7 @@ name: YuixServer
 options:
   deploymentTarget:
     iOS: "16.0"
-  xcodeVersion: "15.0"
-  objectVersion: 56          # 强制生成 Xcode 14 兼容格式，避免 CI 上 Xcode 15.x 读不了新格式(77)
+  objectVersion: 56          # 强制生成 Xcode 14 兼容格式，避免 CI 上低版本 Xcode 读不了新格式(77)
   createIntermediateGroups: true
 
 # 仅一个第三方依赖：ZIPFoundation（用于 .zip 压缩导出/导入），纯 Swift、App Store 合规。
@@ -50,8 +49,6 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLSchemes:
               - yuixserver
-        NSBonjourServices:
-          - "_http._tcp"
         NSLocalNetworkUsageDescription: "YuixServer 需要访问本地网络以显示设备的局域网 IP，并允许同一 Wi-Fi 下的其他设备访问你启动的服务。"
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait

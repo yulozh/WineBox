@@ -5,6 +5,7 @@ struct FileTreeView: View {
     @EnvironmentObject var store: ProjectStore
     @State private var renameTarget: FileNode?
     @State private var newName: String = ""
+    @State private var deleteTarget: FileNode?
     @State private var previewURL: IdentifiableURL?
 
     var body: some View {
@@ -45,6 +46,19 @@ struct FileTreeView: View {
             }
             Button("取消", role: .cancel) { renameTarget = nil }
         }
+        .confirmationDialog(
+            "删除「\(deleteTarget?.name ?? "")」？",
+            isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("删除", role: .destructive) {
+                if let target = deleteTarget { store.deleteFile(at: target.url) }
+                deleteTarget = nil
+            }
+            Button("取消", role: .cancel) { deleteTarget = nil }
+        } message: {
+            Text("此操作不可撤销")
+        }
         .sheet(item: $previewURL) { item in
             NavigationStack {
                 WebPreviewView(url: item.url)
@@ -73,10 +87,9 @@ struct FileTreeView: View {
             if !node.isDirectory {
                 Button { store.selectedFileURL = node.url } label: { Label("打开", systemImage: "doc.text") }
                 Button { previewURL = IdentifiableURL(url: node.url) } label: { Label("预览", systemImage: "safari") }
-                Button { if let p = store.activeProject { store.markServiceRunning(p) } } label: { Label("运行脚本", systemImage: "play") }.disabled(store.activeProject == nil)
             }
             Button { renameTarget = node; newName = node.name } label: { Label("重命名", systemImage: "pencil") }
-            Button(role: .destructive) { store.deleteFile(at: node.url) } label: { Label("删除", systemImage: "trash") }
+            Button(role: .destructive) { deleteTarget = node } label: { Label("删除", systemImage: "trash") }
         }
     }
 

@@ -72,6 +72,9 @@ struct SettingsView: View {
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            // 配置改动即时落盘（修复：baseURL/模型/命名空间重启即丢）
+            .onChange(of: store.aiConfig) { _ in store.persistConfigs() }
+            .onChange(of: store.gitConfig) { _ in store.persistConfigs() }
         }
     }
 }
