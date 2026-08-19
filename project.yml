@@ -1,0 +1,61 @@
+# YuixServer 工程配置（使用 XcodeGen 生成 .xcodeproj）
+# 生成方式：在项目根目录执行 `xcodegen generate`
+# 或：在 Xcode 中新建 SwiftUI iOS 工程后，将 YuixServer/ 目录源码拖入，并添加 ZIPFoundation 依赖。
+#
+# 签名说明：Bundle ID 已设为描述文件锁定的 `app.star2977.grape6286`，
+# 采用 Manual 签名 + TeamID 283M9R6THP，配合用户上传的 .p12 与 .mobileprovision。
+# 实际出包由 GitHub Actions（macos 云端机）编译并签名，见 .github/workflows/build-ipa.yml。
+
+name: YuixServer
+options:
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+  createIntermediateGroups: true
+
+# 仅一个第三方依赖：ZIPFoundation（用于 .zip 压缩导出/导入），纯 Swift、App Store 合规。
+packages:
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    from: 0.9.19
+
+targets:
+  YuixServer:
+    type: application
+    platform: iOS
+    sources:
+      - YuixServer
+    dependencies:
+      - package: ZIPFoundation
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.star2977.grape6286
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1,2"       # 同时支持 iPhone 与 iPad
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: 283M9R6THP
+        CODE_SIGN_IDENTITY: "iPhone Distribution"
+    info:
+      path: YuixServer/Info.plist
+      properties:
+        CFBundleDisplayName: YuixServer
+        UILaunchScreen: {}                 # 现代应用必需的启动屏占位
+        UIFileSharingEnabled: true         # 在「文件」App 中可见沙盒 Documents，便于导入/导出
+        LSSupportsOpeningDocumentsInPlace: true
+        LSApplicationQueriesSchemes:
+          - ish
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - yuixserver
+        NSBonjourServices:
+          - "_http._tcp"
+        NSLocalNetworkUsageDescription: "YuixServer 需要访问本地网络以显示设备的局域网 IP，并允许同一 Wi-Fi 下的其他设备访问你启动的服务。"
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~iphone:
+          - UIInterfaceOrientationPortrait

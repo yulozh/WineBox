@@ -1,0 +1,17 @@
+# Xcode
+.DS_Store
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcodeproj
+!project.yml
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# 本地敏感信息（绝不提交任何凭证）
+*.env
+.env
+secrets/

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Ad Hoc 分发：配合 iPhone Distribution 证书 + 单设备描述文件 -->
+    <key>method</key>
+    <string>ad-hoc</string>
+    <key>signingStyle</key>
+    <string>manual</string>
+    <key>teamID</key>
+    <string>283M9R6THP</string>
+    <key>signingCertificate</key>
+    <string>iPhone Distribution</string>
+    <key>provisioningProfiles</key>
+    <dict>
+        <key>app.star2977.grape6286</key>
+        <string>5f1e8b56-a7e9-49e5-8ede-349fef46cb0f</string>
+    </dict>
+</dict>
+</plist>

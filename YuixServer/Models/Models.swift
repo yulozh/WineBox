@@ -1,0 +1,119 @@
+import Foundation
+
+// MARK: - 运行时语言
+
+/// 应用内置的多语言运行时类型。
+/// 注意：受 iOS 沙盒限制，真正的进程运行由 RuntimeService 抽象层承载，
+/// 详见 Services/ServiceRegistry.swift 中的说明。
+enum Language: String, CaseIterable, Codable, Identifiable {
+    case python = "Python"
+    case php = "PHP"
+    case node = "Node.js"
+    case html = "Static"
+
+    var id: String { rawValue }
+
+    /// 该语言默认的入口文件名
+    var entryFileName: String {
+        switch self {
+        case .python: return "app.py"
+        case .php:     return "index.php"
+        case .node:    return "server.js"
+        case .html:    return "index.html"
+        }
+    }
+
+    /// 新建项目时自动写入的模板代码
+    var template: String {
+        switch self {
+        case .python:
+            return "# app.py\nprint('YuixServer: Python 环境已就绪')\n"
+        case .php:
+            return "<?php\n// index.php\necho 'YuixServer: PHP 环境已就绪';\n"
+        case .node:
+            return "// server.js\nconst http = require('http');\nconst port = process.env.PORT || 8080;\nconst server = http.createServer((req, res) => res.end('YuixServer: Node.js 环境已就绪'));\nserver.listen(port, () => console.log('listening on ' + port));\n"
+        case .html:
+            return "<!doctype html>\n<html><body><h1>YuixServer</h1><p>Static site</p></body></html>\n"
+        }
+    }
+}
+
+// MARK: - 项目
+
+/// 一个「项目」对应一个运行环境（代码目录 + 依赖 + 配置 + 端口）。
+struct Project: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name: String
+    var language: Language
+    var port: Int
+    var createdAt: Date
+
+    init(id: UUID = UUID(), name: String, language: Language, port: Int, createdAt: Date = Date()) {
+        self.id = id
+        self.name = name
+        self.language = language
+        self.port = port
+        self.createdAt = createdAt
+    }
+}
+
+// MARK: - 服务状态
+
+enum ServiceStatus: String, Codable {
+    case stopped, starting, running, error
+}
+
+/// 端口服务列表中的一项。
+struct ServiceInfo: Identifiable {
+    let id = UUID()
+    let projectID: UUID
+    var name: String
+    var port: Int
+    var language: Language
+    var pid: Int?          // 侧载/进程版可用；沙盒版为 nil
+    var status: ServiceStatus
+}
+
+// MARK: - 文件树节点
+
+/// 文件浏览器中的节点。children 仅在目录时非空。
+struct FileNode: Identifiable {
+    let id = UUID()
+    let name: String
+    let url: URL
+    let isDirectory: Bool
+    var children: [FileNode]?
+}
+
+// MARK: - AI 对话
+
+enum ChatRole: String, Codable {
+    case system, user, assistant
+}
+
+/// 单条对话消息（system 用于设定 AI 角色与重写写入文件的规则）。
+struct ChatMessage: Identifiable, Codable {
+    let id = UUID()
+    var role: ChatRole
+    var content: String
+    var timestamp: Date
+
+    /// 转为 OpenAI 兼容接口所需的字典
+    var apiDict: [String: String] { ["role": role.rawValue, "content": content] }
+}
+
+// MARK: - AI 配置
+
+/// AI 服务商配置。apiKey 明文不保存在内存结构体里，而存入 Keychain。
+struct AIConfig: Equatable {
+    var providerName: String = "OpenAI"
+    var baseURL: String = "https://api.openai.com/v1"   // 兼容 OpenAI 的 /chat/completions 端点
+    var model: String = "gpt-4o"                        // 默认模型，可配置
+}
+
+// MARK: - GitHub 配置
+
+/// GitHub 账号信息（仅用于组织/命名空间提示）。Token 存 Keychain，不落盘明文。
+struct GitConfig: Equatable {
+    var defaultOwner: String = "yulozh"                 // 默认仓库命名空间
+}
