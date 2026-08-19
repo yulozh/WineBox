@@ -9,9 +9,6 @@
 #import "YXFakefsImport.h"
 
 #include <pthread.h>
-#include <resolv.h>
-#include <netdb.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -473,31 +470,44 @@ static void yx_boot_output_trampoline(const char *data, size_t len) {
     return YES;
 }
 
+// Mirror the host's DNS configuration into the guest by parsing /etc/resolv.conf.
+// iOS keeps /etc/resolv.conf in sync with the active network configuration.
+// This deliberately avoids libresolv: the iOS SDK ships no libresolv.tbd and
+// the res_9_* symbols are not exported by libSystem on device, so linking
+// them fails. No-link parsing is also one less dependency to audit.
 - (void)configureDNS {
-    struct __res_state res;
-    if (res_ninit(&res) != 0)
-        return;
     NSMutableString *conf = [NSMutableString new];
-    if (res.dnsrch[0] != NULL) {
-        [conf appendString:@"search"];
-        for (int i = 0; res.dnsrch[i] != NULL && i < 6; i++)
-            [conf appendFormat:@" %s", res.dnsrch[i]];
-        [conf appendString:@"\n"];
+    NSUInteger nameservers = 0;
+    NSString *hostResolv = [NSString stringWithContentsOfFile:@"/etc/resolv.conf"
+                                                     encoding:NSUTF8StringEncoding
+                                                        error:nil];
+    if (hostResolv.length > 0) {
+        NSArray<NSString *> *lines = [hostResolv
+            componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+        // 只看前 64 行：resolv.conf 正常只有几行，防御异常大文件拖慢引导
+        NSUInteger limit = MIN(lines.count, (NSUInteger) 64);
+        for (NSUInteger i = 0; i < limit; i++) {
+            NSArray<NSString *> *tokens = [[lines objectAtIndex:i]
+                componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+            tokens = [tokens filteredArrayUsingPredicate:
+                [NSPredicate predicateWithFormat:@"length > 0"]];
+            if (tokens.count < 2)
+                continue;
+            NSString *directive = tokens[0].lowercaseString;
+            if ([directive isEqualToString:@"nameserver"]) {
+                [conf appendFormat:@"nameserver %@\n", tokens[1]];
+                nameservers++;
+            } else if ([directive isEqualToString:@"search"] ||
+                       [directive isEqualToString:@"domain"]) {
+                // 最多 6 个域，与 musl 解析器的 resolv.conf 习惯一致
+                NSArray<NSString *> *domains =
+                    [tokens subarrayWithRange:NSMakeRange(1, MIN(tokens.count - 1, (NSUInteger) 6))];
+                [conf appendFormat:@"search %@\n",
+                    [domains componentsJoinedByString:@" "]];
+            }
+        }
     }
-    union res_sockaddr_union servers[NI_MAXSERV];
-    int found = res_getservers(&res, servers, NI_MAXSERV);
-    char address[NI_MAXHOST];
-    int written = 0;
-    for (int i = 0; i < found; i++) {
-        union res_sockaddr_union s = servers[i];
-        if (s.sin.sin_len == 0)
-            continue;
-        getnameinfo((struct sockaddr *) &s.sin, s.sin.sin_len, address, sizeof(address), NULL, 0, NI_NUMERICHOST);
-        [conf appendFormat:@"nameserver %s\n", address];
-        written++;
-    }
-    res_nclose(&res);
-    if (written == 0)
+    if (nameservers == 0)
         [conf appendString:@"nameserver 8.8.8.8\nnameserver 1.1.1.1\n"];
     current = pid_get_task(1);
     yx_guest_write_file("/etc/resolv.conf", conf.UTF8String);

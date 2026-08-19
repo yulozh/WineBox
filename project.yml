@@ -52,8 +52,8 @@ targets:
         # ISH_INTERNAL：engine/fs/fake.h 等内部头文件的保护宏（引擎 .c 自带
         # #define，应用侧 YX*.m/.c 经 Xcode 编译需要在此统一定义）
         GCC_PREPROCESSOR_DEFINITIONS: "$(inherited) GUEST_ARM64=1 ENGINE_ASBESTOS=1 LOG_HANDLER_NSLOG=1 ISH_INTERNAL=1"
-        # 注意：不能用 -lresolv —— iOS SDK 里没有 libresolv.tbd（那是 macOS 专属），
-        # iOS 的 res_ninit/res_getservers 符号在 libSystem 中，无需显式链接。
+        # 注意：不链接 -lresolv。iOS SDK 无 libresolv.tbd，res_9_* 符号也不在
+        # libSystem 中；DNS 配置改为解析 /etc/resolv.conf（见 YXLinuxBoot.m configureDNS）。
         OTHER_LDFLAGS: "$(inherited) $(SRCROOT)/engine/build/libish.a $(SRCROOT)/engine/build/libish_emu.a $(SRCROOT)/engine/build/libfakefs.a -lsqlite3 -lz"
         # 引擎 C 代码是 C11 + 部分 GNU 扩展，与 Swift 混编目标关掉严格警告即不足以报错
         GCC_WARN_64_TO_32_BIT_CONVERSION: NO
