@@ -5,7 +5,7 @@ struct FileTreeView: View {
     @EnvironmentObject var store: ProjectStore
     @State private var renameTarget: FileNode?
     @State private var newName: String = ""
-    @State private var previewURL: URL?
+    @State private var previewURL: IdentifiableURL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -45,10 +45,10 @@ struct FileTreeView: View {
             }
             Button("取消", role: .cancel) { renameTarget = nil }
         }
-        .sheet(item: $previewURL) { url in
+        .sheet(item: $previewURL) { item in
             NavigationStack {
-                WebPreviewView(url: url)
-                    .navigationTitle(url.lastPathComponent)
+                WebPreviewView(url: item.url)
+                    .navigationTitle(item.url.lastPathComponent)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { previewURL = nil } } }
             }
@@ -72,7 +72,7 @@ struct FileTreeView: View {
         .contextMenu {
             if !node.isDirectory {
                 Button { store.selectedFileURL = node.url } label: { Label("打开", systemImage: "doc.text") }
-                Button { previewURL = node.url } label: { Label("预览", systemImage: "safari") }
+                Button { previewURL = IdentifiableURL(url: node.url) } label: { Label("预览", systemImage: "safari") }
                 Button { if let p = store.activeProject { store.markServiceRunning(p) } } label: { Label("运行脚本", systemImage: "play") }.disabled(store.activeProject == nil)
             }
             Button { renameTarget = node; newName = node.name } label: { Label("重命名", systemImage: "pencil") }

@@ -4,7 +4,7 @@ import SwiftUI
 /// 提供 运行/停止 与「预览/打开地址」，并支持「导出容器」。
 struct ServiceStatusBar: View {
     @EnvironmentObject var store: ProjectStore
-    @State private var previewURL: URL?
+    @State private var previewURL: IdentifiableURL?
     @State private var showExportPicker = false
     @State private var showImportPicker = false
     @State private var exportFileURL: URL?
@@ -40,10 +40,10 @@ struct ServiceStatusBar: View {
             .frame(height: 52)
         }
         .glass(cornerRadius: 16)
-        .sheet(item: $previewURL) { url in
+        .sheet(item: $previewURL) { item in
             NavigationStack {
-                WebPreviewView(url: url)
-                    .navigationTitle(url.lastPathComponent)
+                WebPreviewView(url: item.url)
+                    .navigationTitle(item.url.lastPathComponent)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { previewURL = nil } } }
             }
@@ -78,7 +78,7 @@ struct ServiceStatusBar: View {
 
             Button {
                 if let url = runtime.previewURL(project: project(for: service)) {
-                    previewURL = url
+                    previewURL = IdentifiableURL(url: url)
                 }
             } label: {
                 Image(systemName: "safari")
