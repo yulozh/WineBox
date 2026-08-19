@@ -17,16 +17,8 @@ jobs:
       - name: Checkout 源码
         uses: actions/checkout@v4
 
-      - name: 选择 Xcode 16
-        run: |
-          XCODE16=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | head -1)
-          if [ -n "$XCODE16" ]; then
-            sudo xcode-select -s "$XCODE16"
-            echo "已切换到 $XCODE16"
-          else
-            echo "未找到 Xcode 16，沿用默认"
-          fi
-          xcodebuild -version
+      - name: 显示 Xcode 版本（沿用 runner 默认，已含 iOS SDK）
+        run: xcodebuild -version
 
       - name: 安装 XcodeGen
         run: brew install xcodegen
