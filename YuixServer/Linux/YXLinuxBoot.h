@@ -39,7 +39,14 @@ typedef void (^YXLinuxOutputHandler)(NSData *data);
 
 /// Boot synchronously (idempotent). Safe to call from any thread.
 /// Returns YES when the kernel is ready. On NO, error is filled.
+/// 注意：NSError** 变体会被 Swift 导入器按 Cocoa 错误约定转换成
+/// `throws` 方法；Swift 侧请改用下面的 bootWithFailureMessage:。
 - (BOOL)bootWithError:(NSError *_Nullable *_Nullable)error;
+
+/// Swift-friendly sync boot (NSString** 不触发错误约定转换)。
+/// Returns YES when the kernel is ready. On NO, *failureMessage (if non-NULL)
+/// receives a short human-readable description.
+- (BOOL)bootWithFailureMessage:(NSString *_Nullable *_Nullable)failureMessage;
 
 /// Register a console output listener. Returns a token for removal.
 /// The handler is called on a private serial queue.

@@ -86,16 +86,19 @@ final class LinuxRuntime: ObservableObject {
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let boot = YXLinuxBoot.shared()
-            var nsError: NSError?
-            let ok = boot.bootWithError(&nsError)
-            timer.invalidate()
+            // 注意：bootWithError: 被 Swift 导入为 throws 方法，
+            // 这里用 bootWithFailureMessage: 避免错误约定转换。
+            var failureMessage: NSString?
+            let ok = boot.bootWithFailureMessage(&failureMessage)
+            let message = failureMessage as String?
             Task { @MainActor [weak self] in
+                timer.invalidate() // Timer 必须在创建它的线程（主线程）上 invalidate
                 guard let self else { return }
                 self.booting = false
                 if ok {
                     self.state = .ready
                 } else {
-                    self.state = .failed(nsError?.localizedDescription ?? "启动失败")
+                    self.state = .failed(message ?? "启动失败")
                 }
             }
         }

@@ -48,8 +48,10 @@ final class VT100 {
     /// 输出为 NSAttributedString（等宽字体由调用方设置）
     func attributedString(baseFont: UIFont) -> NSAttributedString {
         let out = NSMutableAttributedString()
-        let normal = [NSAttributedString.Key.font: baseFont,
-                      NSAttributedString.Key.foregroundColor: VT100.color(7)]
+        let normal: [NSAttributedString.Key: Any] = [
+            .font: baseFont,
+            .foregroundColor: VT100.color(7),
+        ]
         for (i, line) in lines.enumerated() {
             var runText = ""
             var runAttr = normal
@@ -124,7 +126,7 @@ final class VT100 {
             scrollIfNeeded()
         case "\r":
             cursorCol = 0
-        case "\b":
+        case "\u{08}": // BS（Swift 无 \b 转义，退格是 U+0008）
             if cursorCol > 0 { cursorCol -= 1 }
         case "\t":
             let next = ((cursorCol / 8) + 1) * 8

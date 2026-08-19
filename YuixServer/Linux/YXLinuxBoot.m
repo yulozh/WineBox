@@ -295,6 +295,18 @@ static void yx_boot_output_trampoline(const char *data, size_t len) {
     return ok;
 }
 
+// Swift-friendly variant: NSError** gets imported by Swift as a `throws`
+// method, which callers can't invoke with `&nsError` semantics. NSString**
+// imports cleanly as an optional-inout, so Swift uses this one.
+- (BOOL)bootWithFailureMessage:(NSString **)failureMessage {
+    NSError *error = nil;
+    BOOL ok = [self bootWithError:&error];
+    if (!ok && failureMessage != NULL) {
+        *failureMessage = error.localizedDescription ?: @"启动失败";
+    }
+    return ok;
+}
+
 - (BOOL)bootLockedWithError:(NSError **)error {
     if (self.state == YXLinuxBootStateReady)
         return YES;
