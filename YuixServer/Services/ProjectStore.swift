@@ -245,19 +245,47 @@ final class ProjectStore: ObservableObject {
         catch { return false }
     }
 
-    // MARK: - 服务（真实 TCP 端口监听）
+    // MARK: - 服务（真实 TCP 端口监听 / Alpine 内真实进程）
 
-    /// 运行中的服务器（key = 项目 id）。App 重启后不自动恢复，状态一律从 stopped 开始。
+    /// 运行中的静态服务器（key = 项目 id）。App 重启后不自动恢复，状态一律从 stopped 开始。
     private var servers: [UUID: HTTPFileServer] = [:]
 
+    /// Alpine Linux 内运行的项目进程（Python / Node.js / PHP）。
+    private var launchers: [UUID: RuntimeLauncher] = [:]
+
     func isServiceRunning(_ projectID: UUID) -> Bool {
-        servers[projectID]?.isRunning == true
+        if servers[projectID]?.isRunning == true { return true }
+        if case .running = launchers[projectID]?.phase { return true }
+        return false
     }
 
-    /// 启动：在 project.port 上监听 TCP，把项目目录作为静态站点对外提供。
+    /// 项目的运行输出面板模型（供 ServiceStatusBar 弹出控制台）。
+    func runConsole(for project: Project) -> RuntimeLauncher? {
+        launchers[project.id]
+    }
+
+    /// 启动：
+    /// - Python / Node / PHP：在内置 Alpine Linux 中以真实进程运行（缺运行时自动 apk 安装）
+    /// - 静态站：原生 NWListener 监听 TCP，把项目目录作为静态站点对外提供
     func startService(_ project: Project) {
-        guard servers[project.id] == nil else { return }
+        guard servers[project.id] == nil, launchers[project.id] == nil else { return }
         updateService(project.id) { $0.status = .starting }
+
+        if project.language != .html {
+            let guest = LinuxRuntime.guestPath(forProject: project, in: self) ?? LinuxRuntime.guestProjectsRoot
+            let launcher = RuntimeLauncher(project: project, guestCWD: guest)
+            launcher.onRunning = { [weak self] in
+                self?.updateService(project.id) { $0.status = .running }
+            }
+            launcher.onExited = { [weak self] code in
+                self?.launchers.removeValue(forKey: project.id)
+                self?.updateService(project.id) { $0.status = code == 0 ? .stopped : .error }
+            }
+            launchers[project.id] = launcher
+            launcher.start()
+            return
+        }
+
         do {
             let server = try HTTPFileServer(root: projectURL(project), port: UInt16(clamping: project.port))
             server.onReady = { [weak self] in
@@ -276,6 +304,7 @@ final class ProjectStore: ObservableObject {
 
     func stopService(_ project: Project) {
         if let server = servers.removeValue(forKey: project.id) { server.stop() }
+        if let launcher = launchers.removeValue(forKey: project.id) { launcher.stop() }
         updateService(project.id) { $0.status = .stopped }
     }
 

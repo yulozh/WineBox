@@ -25,8 +25,18 @@ final class HTTPFileServer {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "com.yuixserver.http-server")
     private var connections: [ObjectIdentifier: NWConnection] = [:]
+    /// 已建立连接但尚未收到完整请求头的连接（用于空闲超时清理）
+    private var pendingHeads: Set<ObjectIdentifier> = []
+    /// 并发 /run 脚本执行数（防止局域网 flood 把内存吃穿）
+    private var activeRuns = 0
     private let stateLock = NSLock()
     private var _isRunning = false
+
+    /// 安全上限：并发连接数 / 脚本执行数 / 请求头大小 / 头部超时
+    private static let maxConnections = 64
+    private static let maxConcurrentRuns = 4
+    private static let maxHeadSize = 65536
+    private static let headTimeout: TimeInterval = 20
 
     /// 端口绑定成功（主线程回调）
     var onReady: (() -> Void)?
@@ -91,12 +101,26 @@ final class HTTPFileServer {
     // MARK: - 连接与请求
 
     private func accept(_ connection: NWConnection) {
+        // 并发上限：超过直接断开，杜绝连接洪水
+        if connections.count >= Self.maxConnections {
+            connection.cancel()
+            return
+        }
         let key = ObjectIdentifier(connection)
         connections[key] = connection
+        pendingHeads.insert(key)
+
+        // 空闲超时：始终发不出完整请求头的连接在 20 秒后强制断开
+        queue.asyncAfter(deadline: .now() + Self.headTimeout) { [weak self] in
+            guard let self, self.pendingHeads.contains(key) else { return }
+            connection.cancel()
+        }
+
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
             case .cancelled, .failed:
                 self?.connections.removeValue(forKey: key)
+                self?.pendingHeads.remove(key)
             default:
                 break
             }
@@ -112,11 +136,12 @@ final class HTTPFileServer {
             if let data { head.append(data) }
 
             if let range = head.range(of: Data("\r\n\r\n".utf8)) {
+                pendingHeads.remove(ObjectIdentifier(connection))
                 let text = String(data: head.subdata(in: head.startIndex..<range.lowerBound), encoding: .utf8) ?? ""
                 self.serve(requestHead: text, connection: connection)
                 return
             }
-            if error != nil || isComplete || head.count > 65536 {
+            if error != nil || isComplete || head.count > Self.maxHeadSize {
                 connection.cancel()
                 return
             }
@@ -187,6 +212,7 @@ final class HTTPFileServer {
     }
 
     /// 执行路由：真正运行项目目录内的 .js 脚本，把 console 输出作为响应返回。
+    /// 异步执行（脚本可能较慢/死循环），并发上限 4，超出直接 503。
     private func serveRun(_ rel: String, method: String, connection: NWConnection) {
         let segments = rel.split(separator: "/").filter { $0 != "." && $0 != ".." }
         guard let name = segments.last, name.lowercased().hasSuffix(".js") else {
@@ -201,18 +227,34 @@ final class HTTPFileServer {
             return
         }
 
-        let result = JSScriptRunner.runFile(at: fileURL, env: ["PORT": String(port)])
-        var text = result.output
-        if !result.returnValue.isEmpty, result.returnValue != "undefined" {
-            text += "=> \(result.returnValue)\n"
+        // 并发上限：脚本执行是重操作（JSContext），限制同时跑 4 个
+        guard activeRuns < Self.maxConcurrentRuns else {
+            respond(status: "503 Service Unavailable", contentType: "text/plain; charset=utf-8",
+                    body: Data("脚本执行繁忙，请稍后重试\n".utf8), method: method, connection: connection)
+            return
         }
-        if let error = result.error {
-            text += "错误: \(error)\n"
-        }
+        activeRuns += 1
 
-        let status = result.error == nil ? "200 OK" : "500 Internal Server Error"
-        respond(status: status, contentType: "text/plain; charset=utf-8",
-                body: Data(text.utf8), method: method, connection: connection)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = JSScriptRunner.runFile(at: fileURL, env: ["PORT": String(self?.port ?? 0)])
+            var text = result.output
+            if !result.returnValue.isEmpty, result.returnValue != "undefined" {
+                text += "=> \(result.returnValue)\n"
+            }
+            if let error = result.error {
+                text += "错误: \(error)\n"
+            }
+            if result.truncated {
+                text += "…[输出已截断]\n"
+            }
+
+            let status = result.error == nil ? "200 OK" : "500 Internal Server Error"
+            self?.queue.async {
+                self?.activeRuns -= 1
+                self?.respond(status: status, contentType: "text/plain; charset=utf-8",
+                              body: Data(text.utf8), method: method, connection: connection)
+            }
+        }
     }
 
     private func respond(status: String, contentType: String, body: Data,

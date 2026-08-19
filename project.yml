@@ -24,7 +24,16 @@ targets:
     type: application
     platform: iOS
     sources:
-      - YuixServer
+      # 应用源码（Swift + Linux 引擎封装的 .m/.c）。
+      # Info.plist 由 XcodeGen 按 info: 段自动生成并自动排除。
+      - path: YuixServer
+        excludes:
+          - "Resources/**"
+      # 内置 Alpine rootfs 与 node polyfill —— 必须进 resources 构建阶段
+      # （root.tar.gz / rootfs.sha256 / *.js 均为非编译资源）。
+      # 运行时经 [NSBundle URLForResource:] 读取，rootfs 损坏会拒绝导入。
+      - path: YuixServer/Resources
+        buildPhase: resources
     dependencies:
       - package: ZIPFoundation
     settings:
@@ -37,6 +46,15 @@ targets:
         CODE_SIGN_STYLE: Manual
         DEVELOPMENT_TEAM: 283M9R6THP
         CODE_SIGN_IDENTITY: "iPhone Distribution"
+        # ---- 内置 Alpine Linux 引擎（engine/，由 scripts/build-engine.sh 产出）----
+        SWIFT_OBJC_BRIDGING_HEADER: YuixServer/YuixServer-Bridging-Header.h
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/engine"
+        GCC_PREPROCESSOR_DEFINITIONS: "$(inherited) GUEST_ARM64=1 ENGINE_ASBESTOS=1 LOG_HANDLER_NSLOG=1"
+        # 注意：不能用 -lresolv —— iOS SDK 里没有 libresolv.tbd（那是 macOS 专属），
+        # iOS 的 res_ninit/res_getservers 符号在 libSystem 中，无需显式链接。
+        OTHER_LDFLAGS: "$(inherited) $(SRCROOT)/engine/build/libish.a $(SRCROOT)/engine/build/libish_emu.a $(SRCROOT)/engine/build/libfakefs.a -lsqlite3 -lz"
+        # 引擎 C 代码是 C11 + 部分 GNU 扩展，与 Swift 混编目标关掉严格警告即不足以报错
+        GCC_WARN_64_TO_32_BIT_CONVERSION: NO
     info:
       path: YuixServer/Info.plist
       properties:

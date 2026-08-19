@@ -7,6 +7,9 @@ xcuserdata/
 *.xcodeproj
 !project.yml
 
+# 引擎构建产物（engine/ 源码入库，build/ 由 scripts/build-engine.sh 本地生成）
+engine/build/
+
 # Swift Package Manager
 .build/
 .swiftpm/

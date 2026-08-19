@@ -9,6 +9,7 @@ struct ServiceStatusBar: View {
     @State private var exportFileURL: URL?
     @State private var showPortTest = false
     @State private var errorMessage: String?
+    @State private var consoleLauncher: RuntimeLauncher?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -48,6 +49,9 @@ struct ServiceStatusBar: View {
             }
         }
         .sheet(isPresented: $showPortTest) { PortTestView() }
+        .sheet(item: $consoleLauncher) { launcher in
+            RunConsoleView(launcher: launcher)
+        }
         .sheet(isPresented: $showExportPicker) {
             if let url = exportFileURL { ExportDocumentPicker(url: url) }
         }
@@ -91,6 +95,20 @@ struct ServiceStatusBar: View {
                     Image(systemName: service.status == .running ? "stop.fill" : "play.fill")
                 }
                 .buttonStyle(.borderless)
+
+                // 代码项目：查看 Alpine 内进程的实时输出
+                if project.language != .html {
+                    Button {
+                        if store.runConsole(for: project) == nil {
+                            store.startService(project)
+                        }
+                        consoleLauncher = store.runConsole(for: project)
+                    } label: {
+                        Image(systemName: "doc.text.magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("运行输出")
+                }
 
                 Button {
                     if let url = store.previewURL(for: project) {

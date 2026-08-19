@@ -20,8 +20,13 @@ jobs:
       - name: 显示 Xcode 版本（沿用 runner 默认，已含 iOS SDK）
         run: xcodebuild -version
 
-      - name: 安装 XcodeGen
-        run: brew install xcodegen
+      - name: 安装构建工具（XcodeGen + meson/ninja/llvm，后三者用于引擎）
+        run: brew install xcodegen meson ninja llvm
+
+      - name: 构建 Linux 引擎（ish 内核 + asbestos JIT，arm64 静态库）
+        run: |
+          chmod +x scripts/build-engine.sh
+          ./scripts/build-engine.sh
 
       - name: 生成 Xcode 工程
         run: xcodegen generate
