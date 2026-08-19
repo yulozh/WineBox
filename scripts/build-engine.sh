@@ -32,6 +32,10 @@ echo "clang:  $(command -v clang)"
 
 mkdir -p "$BUILD"
 CROSS="$BUILD/cross-ios-arm64.txt"
+# 关键：必须显式 -isysroot 指向 iPhoneOS SDK。否则 clang 以 macOS sysroot
+# 链接 iOS 目标，libsqlite3 等 tbd 因平台不匹配被 ld 拒绝
+#（CI 实测报错：C shared or static library 'sqlite3' not found）。
+# vdso 是 -target aarch64-linux-gnu 的独立 ELF 构建，不受 sysroot 影响。
 cat > "$CROSS" <<EOF
 [binaries]
 c = 'clang'
@@ -44,8 +48,8 @@ cpu = 'aarch64'
 endian = 'little'
 
 [built-in options]
-c_args = ['-arch', 'arm64', '-miphoneos-version-min=16.0']
-c_link_args = ['-arch', 'arm64']
+c_args = ['-arch', 'arm64', '-miphoneos-version-min=16.0', '-isysroot', '$SDKROOT']
+c_link_args = ['-arch', 'arm64', '-isysroot', '$SDKROOT']
 
 [properties]
 needs_exe_wrapper = true
