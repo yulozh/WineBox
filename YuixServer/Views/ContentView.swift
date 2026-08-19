@@ -141,9 +141,12 @@ struct ContentView: View {
             Spacer()
 
             Button { showNewProject = true } label: {
-                Label("新建", systemImage: "plus")
+                if isCompact {
+                    Label("新建", systemImage: "plus").labelStyle(.iconOnly)
+                } else {
+                    Label("新建", systemImage: "plus")
+                }
             }
-            .labelStyle(isCompact ? AnyLabelStyle(.iconOnly) : AnyLabelStyle(.titleAndIcon))
             .buttonStyle(.borderedProminent)
 
             Button { withAnimation { aiVisible.toggle() } } label: {

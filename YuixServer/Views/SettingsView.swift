@@ -49,8 +49,8 @@ struct SettingsView: View {
                         auth.start(clientID: oauthClientID) { result in
                             DispatchQueue.main.async {
                                 switch result {
-                                case .success(let code):
-                                    // 生产环境：将 code 交给你的后端换取 token（避免在客户端暴露 secret）
+                                case .success:
+                                    // 生产环境：将授权码交给你的后端换取 token（避免在客户端暴露 secret）
                                     saveMessage = "已获取授权码，请交由后端换 token"
                                 case .failure(let err):
                                     saveMessage = "OAuth 失败: \(err.localizedDescription)"
