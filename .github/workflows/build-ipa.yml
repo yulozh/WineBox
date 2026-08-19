@@ -8,6 +8,11 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+# 失败时用 GITHUB_TOKEN 自动创建 Issue 报告错误（便于诊断闭环）
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   build:
     name: Build & Export IPA
@@ -26,7 +31,7 @@ jobs:
       - name: 构建 Linux 引擎（ish 内核 + asbestos JIT，arm64 静态库）
         run: |
           chmod +x scripts/build-engine.sh
-          ./scripts/build-engine.sh
+          ./scripts/build-engine.sh 2>&1 | tee engine-build.log | tail -30
 
       - name: 生成 Xcode 工程
         run: xcodegen generate
@@ -62,13 +67,13 @@ jobs:
             -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/YuixServer.xcarchive" \
             CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=283M9R6THP \
             PROVISIONING_PROFILE_SPECIFIER="5f1e8b56-a7e9-49e5-8ede-349fef46cb0f" \
-            archive 2>&1 | tail -150
+            archive 2>&1 | tee "$RUNNER_TEMP/archive.log" | tail -150
 
       - name: 导出 IPA
         run: |
           set -o pipefail
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/YuixServer.xcarchive" \
-            -exportOptionsPlist ExportOptions.plist -exportPath "$RUNNER_TEMP/export" 2>&1 | tail -50
+            -exportOptionsPlist ExportOptions.plist -exportPath "$RUNNER_TEMP/export" 2>&1 | tee "$RUNNER_TEMP/export.log" | tail -50
 
       - name: 上传 IPA 产物
         uses: actions/upload-artifact@v4
@@ -76,3 +81,51 @@ jobs:
           name: YuixServer-IPA
           path: ${{ runner.temp }}/export/*.ipa
           retention-days: 30
+          if-no-files-found: error
+
+      # ---------- 失败诊断（以下仅在失败时运行）----------
+
+      - name: 上传完整构建日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            ${{ runner.temp }}/archive.log
+            ${{ runner.temp }}/export.log
+            engine-build.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: 失败时创建 Issue 报告错误
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "## 构建失败报告"
+            echo ""
+            echo "- Run: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo "- Commit: \`${{ github.sha }}\`"
+            echo "- 触发者: ${{ github.actor }}"
+            echo "- 时间: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo ""
+            echo "### 错误摘要（去重）"
+            echo '```'
+            grep -hE "error:|fatal error:|Undefined symbol|Undefined symbols|linker command|ARCHIVE FAILED|BUILD FAILED|No such file|xcodebuild: error" \
+              "$RUNNER_TEMP/archive.log" "$RUNNER_TEMP/export.log" engine-build.log 2>/dev/null \
+              | sort -u | head -100 || echo "(未匹配到已知错误模式，见下方日志末尾)"
+            echo '```'
+            echo ""
+            echo "### archive 日志末尾（150 行）"
+            echo '```'
+            tail -150 "$RUNNER_TEMP/archive.log" 2>/dev/null || echo "(无 archive.log)"
+            echo '```'
+          } > issue-body.md
+          gh issue create \
+            --title "CI 构建失败 run #${{ github.run_number }}（${{ github.sha }}）" \
+            --body-file issue-body.md \
+            --label "ci-failure" 2>/dev/null || \
+          gh issue create \
+            --title "CI 构建失败 run #${{ github.run_number }}（${{ github.sha }}）" \
+            --body-file issue-body.md
