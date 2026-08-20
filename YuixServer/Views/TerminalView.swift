@@ -12,6 +12,8 @@ struct TerminalView: View {
     @ObservedObject private var runtime = LinuxRuntime.shared
     @State private var consoleModel = ConsoleModel()
     @FocusState private var keyboardFocused: Bool
+    @State private var showAdmin = false
+    @State private var showReinstallConfirm = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,6 +30,16 @@ struct TerminalView: View {
         .onDisappear {
             consoleModel.stop()
         }
+        .sheet(isPresented: $showAdmin) {
+            LinuxAdminView()
+                .presentationDetents([.large])
+        }
+        .confirmationDialog("重装 Alpine Linux？", isPresented: $showReinstallConfirm, titleVisibility: .visible) {
+            Button("抹掉并重装", role: .destructive) { runtime.reinstallRootfs() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("从内置镜像完整重装系统，项目文件不受影响。")
+        }
     }
 
     // MARK: - 头部
@@ -41,6 +53,14 @@ struct TerminalView: View {
                 .foregroundColor(.white.opacity(0.55))
             Spacer()
             statusBadge
+            Button {
+                showAdmin = true
+            } label: {
+                Image(systemName: "externaldrive.connected.to.line.below")
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+            .help("系统管理：更新/升级/修复/重装")
             Button {
                 consoleModel.reset()
             } label: {
@@ -111,8 +131,37 @@ struct TerminalView: View {
                 }
             case .bootingKernel:
                 Text("正在启动 Linux 内核…").font(.caption).foregroundColor(.white.opacity(0.6))
-            case .failed:
-                Text("启动失败，请重启 App 重试").font(.caption).foregroundColor(.red)
+            case .failed(let msg):
+                VStack(spacing: 12) {
+                    Text("启动失败：\(msg)")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                    // 100% 保障闭环：安装阶段失败 → 重试自愈；顽固问题 → 一键重装
+                    HStack(spacing: 10) {
+                        Button {
+                            runtime.retryBoot()
+                        } label: {
+                            Label("重试", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+
+                        Button(role: .destructive) {
+                            showReinstallConfirm = true
+                        } label: {
+                            Label("重装系统", systemImage: "arrow.counterclockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                    }
+                    Text("安装采用「临时目录 → 完整性校验 → 原子上线」三段式，重试/重装不会留下半成品系统。")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.4))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
             default:
                 EmptyView()
             }

@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var gitTokenInput = ""
     @State private var oauthClientID = ""
     @State private var saveMessage = ""
+    @AppStorage("linux.httpMirror") private var httpMirror = false
     private let auth = GitHubAuthService()
 
     var body: some View {
@@ -58,6 +59,13 @@ struct SettingsView: View {
                             }
                         }
                     }
+                }
+
+                Section("Linux 系统") {
+                    Toggle("HTTP 兼容镜像", isOn: $httpMirror)
+                    Text("默认 HTTPS（加密且防篡改）。仅当 apk 更新报 TLS/证书错误时（个别网络环境会破坏 TLS 握手）临时切换 HTTP；切换后重启 App 生效。")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 }
 
                 Section("网络安全（只读）") {

@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sqlite3.h>
 
 #include "kernel/init.h"
 #include "kernel/calls.h"
@@ -158,10 +159,11 @@ static int yx_guest_copy_file(NSString *hostPath, const char *guestPath) {
 @property (nonatomic, copy, nullable) NSString *stateDetail;
 @property (nonatomic, assign) double importProgress;
 @property (nonatomic) NSURL *rootURL;
-@property (nonatomic) dispatch_queue_t outputQueue;
+@property (nonatomic, dispatch_queue_t) outputQueue;
 @property (nonatomic) NSMutableDictionary<NSNumber *, YXLinuxOutputHandler> *handlers;
 @property (nonatomic) NSMutableData *pendingOutput;
 @property (nonatomic) dispatch_semaphore_t bootLock;
+@property (nonatomic, assign) BOOL kernelStarted;
 @end
 
 // C callback trampoline (a block literal is not a C function pointer).
@@ -308,16 +310,58 @@ static void yx_boot_output_trampoline(const char *data, size_t len) {
     if (self.state == YXLinuxBootStateReady)
         return YES;
     if (self.state == YXLinuxBootStateFailed) {
-        if (error)
-            *error = [NSError errorWithDomain:YXLinuxBootErrorDomain code:-1
-                                      userInfo:@{NSLocalizedDescriptionKey: self.stateDetail ?: @"previous boot failed"}];
-        return NO;
+        // 失败可重试——但内核一旦启动过就无法在进程内重来，只能重启 App。
+        // （失败多半发生在安装阶段：磁盘满/被打断/校验不过，重试即可自愈）
+        if (self.kernelStarted) {
+            if (error)
+                *error = [NSError errorWithDomain:YXLinuxBootErrorDomain code:-2
+                                          userInfo:@{NSLocalizedDescriptionKey:
+                                              @"内核启动后失败，请重启 App 再试"}];
+            return NO;
+        }
+        self.state = YXLinuxBootStateIdle; // fall through: 重新走完整安装/引导
     }
 
-    // ---- rootfs import (first launch) ----
+    // ---- rootfs install (first launch) ----
+    // 原子三段式安装：杜绝半成品系统
+    //   1. 先导入 <root>.tmp 临时目录（任何时刻被杀只留下可清理的 tmp）
+    //   2. sqlite 完整性校验（meta.db 可打开、paths 记录数达标）
+    //   3. 原子重命名为正式目录，成功后写安装标记（Documents/alpine-root.installed）
+    // 正式目录只有在全部通过后才会出现 → 「存在 root + 标记」即为可信安装。
     NSString *dataDir = [self.rootURL.path stringByAppendingPathComponent:@"data"];
-    NSString *metaDB = [self.rootURL.path stringByAppendingPathComponent:@"meta.db"];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:metaDB]) {
+    NSString *tmpRoot = [self.rootURL.path stringByAppendingString:@".tmp"];
+    // 标记放在 rootfs 目录外：不进入 fakefs data/，与内核完全解耦
+    NSString *docsRoot = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *markerPath = [docsRoot stringByAppendingPathComponent:@"alpine-root.installed"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    if (![fm fileExistsAtPath:markerPath]) {
+        // 无标记：无论是从未安装、老版本直接导入的存量目录、还是上次安装中断，
+        // 一律清掉重装（宁可多装一次，不给用户一个无法自证的坏系统）
+        if ([fm fileExistsAtPath:self.rootURL.path]) {
+            self.state = YXLinuxBootStateImportingRootfs;
+            self.stateDetail = @"检测到未完成的安装，正在重新安装";
+            [fm removeItemAtPath:self.rootURL.path error:nil];
+        }
+        [fm removeItemAtPath:tmpRoot error:nil];
+
+        // 磁盘空间预检查：rootfs 解压 + sqlite 元数据约 70MB，
+        // 预留 250MB（后续 apk 安装 Python/Node 等运行时同样需要空间）
+        {
+            NSURL *docsURL = [NSURL fileURLWithPath:docsRoot];
+            NSNumber *freeObj = nil;
+            if ([docsURL getResourceValue:&freeObj
+                                   forKey:NSURLVolumeAvailableCapacityForImportantUsageKey
+                                    error:nil] && freeObj.longLongValue >= 0) {
+                int64_t freeMB = freeObj.longLongValue / (1024 * 1024);
+                if (freeMB < 250) {
+                    return [self fail:[NSString stringWithFormat:
+                        @"磁盘空间不足：可用 %lld MB，安装 Alpine 至少需要 250 MB（含后续软件安装余量），请清理设备空间后重试", freeMB]
+                                    error:error];
+                }
+            }
+        }
+
         self.state = YXLinuxBootStateImportingRootfs;
         self.importProgress = 0;
         self.stateDetail = @"正在解压 Alpine rootfs";
@@ -348,28 +392,52 @@ static void yx_boot_output_trampoline(const char *data, size_t len) {
             }
         }
 
-        // remove partial state from a previous failed import
-        [[NSFileManager defaultManager] removeItemAtPath:self.rootURL.path error:nil];
-
         struct yx_import_error ierr;
         struct yx_import_progress cprog = {
             .cookie = (__bridge void *) self,
             .callback = yx_progress_trampoline,
         };
         if (!yx_fakefs_import(archiveURL.fileSystemRepresentation,
-                              self.rootURL.fileSystemRepresentation,
+                              tmpRoot.fileSystemRepresentation,
                               &ierr, cprog)) {
             NSString *msg = [NSString stringWithFormat:@"rootfs 导入失败(line %d, type %d, code %d): %s",
                              ierr.line, ierr.type, ierr.code, ierr.message];
-            [[NSFileManager defaultManager] removeItemAtPath:self.rootURL.path error:nil];
+            [fm removeItemAtPath:tmpRoot error:nil];
             return [self fail:msg error:error];
         }
         self.importProgress = 1;
+        self.stateDetail = @"正在校验安装完整性";
+
+        // ---- 完整性校验：meta.db 可打开且 paths 记录数达标 ----
+        NSString *verifyError = [YXLinuxBoot verifyFakefsAtRoot:tmpRoot];
+        if (verifyError != nil) {
+            [fm removeItemAtPath:tmpRoot error:nil];
+            return [self fail:[NSString stringWithFormat:@"安装完整性校验失败：%@（已自动清理，可重试）", verifyError]
+                            error:error];
+        }
+
+        // ---- 原子上线 + 写标记（标记内容 = 安装时间，便于诊断）----
+        [fm removeItemAtPath:self.rootURL.path error:nil];
+        NSError *moveErr = nil;
+        if (![fm moveItemAtPath:tmpRoot toPath:self.rootURL.path error:&moveErr]) {
+            [fm removeItemAtPath:tmpRoot error:nil];
+            return [self fail:[NSString stringWithFormat:@"安装收尾失败：%@", moveErr.localizedDescription]
+                            error:error];
+        }
+        NSString *stamp = [NSString stringWithFormat:@"installed %@\n", [NSDate date]];
+        if (![stamp writeToFile:markerPath atomically:YES encoding:NSUTF8StringEncoding error:nil]) {
+            // 标记写不进去：目录只读/磁盘满。系统本身已就位，但不写标记
+            // 会导致下次启动误判重装 → 判定安装失败让用户处理
+            [fm removeItemAtPath:self.rootURL.path error:nil];
+            return [self fail:@"无法写入安装标记（磁盘可能已满），请清理后重试" error:error];
+        }
     }
 
     // ---- kernel boot ----
     self.state = YXLinuxBootStateBootingKernel;
     self.stateDetail = @"正在启动 Linux 内核";
+    // 内核即将启动：此后引导若失败，本进程内不可重试（内核无法卸载）
+    self.kernelStarted = YES;
 
     // unix socket tmp prefix (guest abstract sockets map to host temp files)
     {
@@ -517,9 +585,16 @@ static void yx_boot_output_trampoline(const char *data, size_t len) {
     current = pid_get_task(1);
 
     // apk repositories (Alpine 3.21)
-    yx_guest_write_file("/etc/apk/repositories",
-        "https://dl-cdn.alpinelinux.org/alpine/v3.21/main\n"
-        "https://dl-cdn.alpinelinux.org/alpine/v3.21/community\n");
+    // 默认 HTTPS；「HTTP 兼容镜像」开关（linux.httpMirror）应对个别网络环境下
+    // 的 TLS 握手异常（老网关/代理剥离 SNI 等）。CDN 官方同时支持两种协议。
+    {
+        BOOL httpMirror = [[NSUserDefaults standardUserDefaults] boolForKey:@"linux.httpMirror"];
+        NSString *scheme = httpMirror ? @"http" : @"https";
+        NSString *repos = [NSString stringWithFormat:
+            @"%@://dl-cdn.alpinelinux.org/alpine/v3.21/main\n"
+            @"%@://dl-cdn.alpinelinux.org/alpine/v3.21/community\n", scheme, scheme];
+        yx_guest_write_file("/etc/apk/repositories", repos.UTF8String);
+    }
 
     // node polyfills (conditionally --require'd by the kernel for node)
     NSURL *wasm = [[NSBundle mainBundle] URLForResource:@"wasm-polyfill" withExtension:@"js"];
@@ -557,6 +632,94 @@ static void yx_boot_output_trampoline(const char *data, size_t len) {
     generic_mkdirat(AT_PWD, lp, 0755);
     int e = fakefs_bind_mount(lp, hostPath.fileSystemRepresentation, readOnly);
     return e == 0;
+}
+
+// 校验刚安装的 fakefs：meta.db 可打开、库体完好、paths 记录数达标。
+// 返回 nil 表示通过；否则返回失败原因（含自动清理提示由调用方拼接）。
+// 内置 rootfs 共 521 个条目，阈值取 350：远低于正常值、远高于任何半途而废的导入。
++ (nullable NSString *)verifyFakefsAtRoot:(NSString *)root {
+    NSString *dbPath = [root stringByAppendingPathComponent:@"meta.db"];
+    sqlite3 *db = NULL;
+    // 必须以读写模式打开（不带 CREATE）：导入器用 journal_mode=wal 建库，
+    // 若收尾时留下 -wal/-shm 残留，只读连接无法执行 WAL 恢复会直接报
+    // SQLITE_CANTOPEN——把完好的安装误判为损坏。读写打开让 SQLite 自行
+    // 恢复 WAL，既兼容残留场景也兼容无残留场景。
+    if (sqlite3_open_v2(dbPath.fileSystemRepresentation, &db, SQLITE_OPEN_READWRITE, NULL) != SQLITE_OK) {
+        NSString *m = db ? [NSString stringWithUTF8String:sqlite3_errmsg(db)] : @"无法打开";
+        if (db) sqlite3_close(db);
+        return [NSString stringWithFormat:@"meta.db 打开失败: %@", m];
+    }
+    sqlite3_busy_timeout(db, 5000);
+    NSString *failure = nil;
+
+    // 1) 库体完整性体检：页损坏 / 索引错乱在此暴露（quick_check 全库仅
+    //    几百条记录，毫秒级完成；integrity_check 的完整语义对这里过重）
+    {
+        sqlite3_stmt *chk = NULL;
+        if (sqlite3_prepare_v2(db, "PRAGMA quick_check", -1, &chk, NULL) == SQLITE_OK) {
+            if (sqlite3_step(chk) == SQLITE_ROW) {
+                const unsigned char *v = sqlite3_column_text(chk, 0);
+                if (v == NULL || strcmp((const char *) v, "ok") != 0)
+                    failure = [NSString stringWithFormat:@"meta.db 损坏: %s",
+                               v ? (const char *) v : "unknown"];
+            } else {
+                failure = @"meta.db 完整性检查无法执行";
+            }
+            sqlite3_finalize(chk);
+        } else {
+            failure = [NSString stringWithFormat:@"meta.db 无法执行完整性检查: %s",
+                       sqlite3_errmsg(db) ?: "unknown"];
+        }
+    }
+
+    // 2) 文件索引规模达标（半途导入的库记录数远低于阈值）
+    if (failure == nil) {
+        sqlite3_stmt *stmt = NULL;
+        if (sqlite3_prepare_v2(db, "select count(*) from paths", -1, &stmt, NULL) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                long long n = sqlite3_column_int64(stmt, 0);
+                if (n < 350)
+                    failure = [NSString stringWithFormat:@"文件索引不完整（%lld 项，应 ≥350）", n];
+            } else {
+                failure = @"meta.db 无法读取文件索引";
+            }
+        } else {
+            failure = [NSString stringWithFormat:@"meta.db 表结构异常: %s",
+                       sqlite3_errmsg(db) ?: "unknown"];
+        }
+        if (stmt) sqlite3_finalize(stmt);
+    }
+
+    // 3) 校验通过后把 WAL 折叠回主库并截断：正式目录上线时不携带
+    //    -wal/-shm 残留，安装形态干净自包含（失败时无需清理，tmp 目录
+    //    整体会被调用方删除）
+    if (failure == nil)
+        sqlite3_exec(db, "PRAGMA wal_checkpoint(TRUNCATE)", NULL, NULL, NULL);
+    sqlite3_close(db);
+    return failure;
+}
+
+// 抹掉 rootfs 并回到 Idle（内核未启动时可用）。随后再 boot 即完整重装。
+- (BOOL)resetFilesystemWithFailureMessage:(NSString **)failureMessage {
+    dispatch_semaphore_wait(self.bootLock, DISPATCH_TIME_FOREVER);
+    NSString *failMsg = nil;
+    if (self.kernelStarted) {
+        // 内核已启动：fakefs 句柄/挂载都在用，进程内无法安全抹除
+        failMsg = @"系统内核正在运行，无法原地重装；请重启 App 后在安装阶段重试";
+    } else {
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        [fm removeItemAtPath:self.rootURL.path error:nil];
+        [fm removeItemAtPath:[self.rootURL.path stringByAppendingString:@".tmp"] error:nil];
+        [fm removeItemAtPath:[docs stringByAppendingPathComponent:@"alpine-root.installed"] error:nil];
+        self.state = YXLinuxBootStateIdle;
+        self.stateDetail = nil;
+        self.importProgress = 0;
+    }
+    dispatch_semaphore_signal(self.bootLock);
+    if (failMsg != nil && failureMessage != NULL)
+        *failureMessage = failMsg;
+    return failMsg == nil;
 }
 
 - (BOOL)fail:(NSString *)msg error:(NSError **)error {

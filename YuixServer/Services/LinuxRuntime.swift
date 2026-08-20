@@ -134,6 +134,98 @@ final class LinuxRuntime: ObservableObject {
         boot.setConsoleSize(Int32(cols), rows: Int32(rows))
     }
 
+    // MARK: - 失败恢复（100% 安装保障的用户入口）
+
+    /// 失败后手动重试。安装阶段失败（磁盘满/被打断/校验不过）重试即可自愈；
+    /// 内核已启动后的失败仅提示重启 App。
+    func retryBoot() {
+        guard case .failed = state else { return }
+        guard !booting else { return }
+        kernelDiedMessage = nil
+        booting = false
+        state = .idle
+        bootIfNeeded()
+    }
+
+    /// 抹掉 rootfs 并完整重装（内核未启动时可用；运行中会拒绝并提示）。
+    func reinstallRootfs() {
+        guard !booting else { return }
+        booting = true
+        state = .importingRootfs(progress: 0)
+
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if case .importingRootfs = self.state {
+                    self.state = .importingRootfs(progress: YXLinuxBoot.shared().importProgress)
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var failMsg: NSString?
+            let resetOK = YXLinuxBoot.shared().resetFilesystem(withFailureMessage: &failMsg)
+            let message = failMsg as String?
+            Task { @MainActor [weak self] in
+                timer.invalidate()
+                guard let self else { return }
+                if !resetOK {
+                    self.booting = false
+                    self.state = .failed(message ?? "重装失败")
+                    return
+                }
+                // 清理完成 → 立刻走全新安装
+                self.state = .idle
+                self.booting = false
+                self.bootIfNeeded()
+            }
+        }
+    }
+
+    // MARK: - 系统信息（系统管理面板）
+
+    /// guest 内 Alpine 版本（boot 后异步刷新）
+    @Published private(set) var alpineRelease: String?
+
+    func refreshSystemInfo() {
+        guard isReady else { return }
+        run("cat /etc/alpine-release 2>/dev/null", completion: { [weak self] result in
+            let v = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !v.isEmpty { self?.alpineRelease = v }
+        })
+    }
+
+    /// rootfs 占用字节数（Documents/alpine-root 递归统计）
+    nonisolated static func rootfsSize() -> Int64 {
+        let docs = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first
+            ?? NSHomeDirectory() + "/Documents"
+        return directorySize(atPath: docs + "/alpine-root")
+    }
+
+    /// 设备可用空间
+    nonisolated static func freeDisk() -> Int64? {
+        guard let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+              let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+              let bytes = values.volumeAvailableCapacityForImportantUsage else { return nil }
+        return bytes
+    }
+
+    nonisolated private static func directorySize(atPath path: String) -> Int64 {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(atPath: path, includingPropertiesForKeys: [.fileSizeKey]) else {
+            return 0
+        }
+        var total: Int64 = 0
+        for case let item as String in enumerator {
+            if let attrs = try? fm.attributesOfItem(atPath: path + "/" + item),
+               let size = attrs[.size] as? Int64 {
+                total += size
+            }
+        }
+        return total
+    }
+
     // MARK: - 命令执行（sh -c，独立会话）
 
     struct CommandResult {

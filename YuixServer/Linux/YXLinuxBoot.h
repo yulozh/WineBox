@@ -53,6 +53,16 @@ typedef void (^YXLinuxOutputHandler)(NSData *data);
 /// receives a short human-readable description.
 - (BOOL)bootWithFailureMessage:(NSString *_Nullable *_Nullable)failureMessage;
 
+/// 内核是否已在本进程内启动过。一旦为 YES，引导失败只能重启 App 重试
+/// （内核无法在进程内卸载）；为 NO 时可安全重试/重装。
+@property (nonatomic, readonly) BOOL kernelStarted;
+
+/// 卸载并清除已安装的 rootfs（仅在内核未启动时可用，否则返回 NO）。
+/// 成功后状态回到 Idle，随后再次 boot 会完整重装。
+/// rootfs 安装是原子三段式：临时目录导入 → sqlite 完整性校验 → 原子上线；
+/// 任何一步被打断（杀进程/磁盘满/崩溃）都不会留下半成品系统。
+- (BOOL)resetFilesystemWithFailureMessage:(NSString *_Nullable *_Nullable)failureMessage;
+
 /// Register a console output listener. Returns a token for removal.
 /// The handler is called on a private serial queue.
 - (NSUInteger)addOutputHandler:(YXLinuxOutputHandler)handler;

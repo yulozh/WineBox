@@ -607,6 +607,11 @@ fail:
     if (insert_hardlink) sqlite3_finalize(insert_hardlink);
     if (db) {
         if (!result) sqlite3_exec(db, "rollback", NULL, NULL, NULL);
+        else
+            // 显式折叠 WAL 并截断：sqlite3_close 对最后一个连接也会自动
+            // checkpoint，但磁盘紧张时可能静默失败留下 -wal/-shm 残留；
+            // 显式做一遍保证交给校验/上线的 meta.db 是干净自包含的。
+            sqlite3_exec(db, "pragma wal_checkpoint(truncate)", NULL, NULL, NULL);
         sqlite3_close(db);
     }
     if (root_fd >= 0) close(root_fd);
