@@ -335,7 +335,11 @@ static void yx_boot_output_trampoline(const char *data, size_t len) {
     NSString *markerPath = [docsRoot stringByAppendingPathComponent:@"alpine-root.installed"];
     NSFileManager *fm = [NSFileManager defaultManager];
 
-    if (![fm fileExistsAtPath:markerPath]) {
+    // 「存在标记」还需「存在 rootfs 数据目录」同时成立才算可信安装：
+    // 用户从文件 App 清空 Documents 会删掉 root 目录但留下标记，
+    // 此时按未安装处理（下方分支会清残留并完整重装），避免走到
+    // mount_root 才报一个难懂的 errno。
+    if (![fm fileExistsAtPath:markerPath] || ![fm fileExistsAtPath:dataDir]) {
         // 无标记：无论是从未安装、老版本直接导入的存量目录、还是上次安装中断，
         // 一律清掉重装（宁可多装一次，不给用户一个无法自证的坏系统）
         if ([fm fileExistsAtPath:self.rootURL.path]) {
