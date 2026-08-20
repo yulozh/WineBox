@@ -213,13 +213,17 @@ final class LinuxRuntime: ObservableObject {
 
     nonisolated private static func directorySize(atPath path: String) -> Int64 {
         let fm = FileManager.default
-        guard let enumerator = fm.enumerator(atPath: path, includingPropertiesForKeys: [.fileSizeKey]) else {
+        // 用 enumerator(atPath:) + attributesOfItem：带 includingPropertiesForKeys 的
+        // atPath 重载在 Swift 导入时无法匹配（会被解析到 at: 的 URL 版本），
+        // 属性键也显式写 FileAttributeKey.size 避免 `.size` 的上下文歧义。
+        guard let enumerator = fm.enumerator(atPath: path) else {
             return 0
         }
         var total: Int64 = 0
-        for case let item as String in enumerator {
-            if let attrs = try? fm.attributesOfItem(atPath: path + "/" + item),
-               let size = attrs[.size] as? Int64 {
+        while let item = enumerator.nextObject() {
+            guard let name = item as? String else { continue }
+            if let attrs = try? fm.attributesOfItem(atPath: path + "/" + name),
+               let size = attrs[FileAttributeKey.size] as? Int64 {
                 total += size
             }
         }
