@@ -159,7 +159,7 @@ static int yx_guest_copy_file(NSString *hostPath, const char *guestPath) {
 @property (nonatomic, copy, nullable) NSString *stateDetail;
 @property (nonatomic, assign) double importProgress;
 @property (nonatomic) NSURL *rootURL;
-@property (nonatomic, dispatch_queue_t) outputQueue;
+@property (nonatomic) dispatch_queue_t outputQueue;
 @property (nonatomic) NSMutableDictionary<NSNumber *, YXLinuxOutputHandler> *handlers;
 @property (nonatomic) NSMutableData *pendingOutput;
 @property (nonatomic) dispatch_semaphore_t bootLock;
